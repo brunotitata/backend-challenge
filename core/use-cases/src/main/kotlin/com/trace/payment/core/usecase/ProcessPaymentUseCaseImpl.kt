@@ -1,7 +1,9 @@
 package com.trace.payment.core.usecase
 
+import com.trace.payment.boundary.database.IdempotencyRepositorySpec
 import com.trace.payment.boundary.database.PaymentGatewaySpec
 import com.trace.payment.boundary.database.WalletDAOSpec
+import com.trace.payment.boundary.exceptions.ConflictException
 import com.trace.payment.boundary.exceptions.NotFoundException
 import com.trace.payment.boundary.exceptions.UnprocessableEntityException
 import com.trace.payment.boundary.exceptions.ValidationException
@@ -20,17 +22,31 @@ class ProcessPaymentUseCaseImpl(
     private val policyResolver: PolicyResolverSpec,
     private val policyEvaluatorRegistry: PolicyEvaluatorRegistrySpec,
     private val paymentGateway: PaymentGatewaySpec,
+    private val idempotencyRepository: IdempotencyRepositorySpec,
 ) : ProcessPaymentUseCaseSpec {
 
     private val zone = ZoneId.of("America/Sao_Paulo")
 
-    override fun execute(walletId: UUID, amount: BigDecimal, occurredAt: Instant): PaymentEntity {
+    override fun execute(walletId: UUID, amount: BigDecimal, occurredAt: Instant, idempotencyKey: String): PaymentEntity {
         if (amount <= BigDecimal.ZERO) {
             throw ValidationException("amount must be greater than zero")
         }
 
         if (!walletDAO.existsById(walletId)) {
             throw NotFoundException("Wallet not found")
+        }
+
+        val existingKey = idempotencyRepository.findByWalletAndKey(walletId, idempotencyKey)
+        if (existingKey != null) {
+            val hash = RequestHashUtil.computeHash(amount, occurredAt)
+            if (existingKey.requestHash != hash) {
+                throw ConflictException("Idempotency key already used with different payload")
+            }
+            if (existingKey.responseStatus == 422) {
+                throw UnprocessableEntityException("Payment rejected: limit exceeded")
+            }
+            return paymentGateway.findById(existingKey.paymentId!!)
+                ?: throw NotFoundException("Original payment not found")
         }
 
         val policy = policyResolver.resolve(walletId)
@@ -57,7 +73,40 @@ class ProcessPaymentUseCaseImpl(
                 val result = evaluator.evaluate(policy, amount, consumedAmount, classification.periodType)
                 result.approved
             },
-        ) ?: throw UnprocessableEntityException("Payment rejected: limit exceeded")
+        )
+
+        if (payment == null) {
+            val hash = RequestHashUtil.computeHash(amount, occurredAt)
+            idempotencyRepository.save(
+                com.trace.payment.core.entities.IdempotencyRecord(
+                    id = UUID.randomUUID(),
+                    walletId = walletId,
+                    idempotencyKey = idempotencyKey,
+                    requestHash = hash,
+                    paymentId = null,
+                    responseStatus = 422,
+                    responseBody = null,
+                    createdAt = Instant.now(),
+                    updatedAt = Instant.now(),
+                ),
+            )
+            throw UnprocessableEntityException("Payment rejected: limit exceeded")
+        }
+
+        val hash = RequestHashUtil.computeHash(amount, occurredAt)
+        idempotencyRepository.save(
+            com.trace.payment.core.entities.IdempotencyRecord(
+                id = UUID.randomUUID(),
+                walletId = walletId,
+                idempotencyKey = idempotencyKey,
+                requestHash = hash,
+                paymentId = payment.id,
+                responseStatus = 201,
+                responseBody = null,
+                createdAt = Instant.now(),
+                updatedAt = Instant.now(),
+            ),
+        )
 
         return payment
     }

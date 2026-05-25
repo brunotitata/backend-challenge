@@ -2,6 +2,7 @@ package com.trace.payment.adapters.web.configs
 
 import com.trace.payment.adapters.web.dtos.ErrorDTO
 import com.trace.payment.adapters.web.dtos.ErrorResponseDTO
+import com.trace.payment.boundary.exceptions.ConflictException
 import com.trace.payment.boundary.exceptions.NotFoundException
 import com.trace.payment.boundary.exceptions.UnprocessableEntityException
 import com.trace.payment.boundary.exceptions.ValidationException
@@ -32,6 +33,13 @@ fun Application.configureErrorHandling() {
             call.respond(
                 HttpStatusCode.BadRequest,
                 ErrorResponseDTO(error = ErrorDTO(code = "BAD_REQUEST", message = cause.message ?: "Invalid request body")),
+            )
+        }
+
+        exception<ConflictException> { call, cause ->
+            call.respond(
+                HttpStatusCode.Conflict,
+                ErrorResponseDTO(error = ErrorDTO(code = "CONFLICT", message = cause.message ?: "Conflict")),
             )
         }
 

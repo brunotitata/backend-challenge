@@ -6,5 +6,5 @@ import java.time.Instant
 import java.util.UUID
 
 interface ProcessPaymentUseCaseSpec {
-    fun execute(walletId: UUID, amount: BigDecimal, occurredAt: Instant): PaymentEntity
+    fun execute(walletId: UUID, amount: BigDecimal, occurredAt: Instant, idempotencyKey: String): PaymentEntity
 }

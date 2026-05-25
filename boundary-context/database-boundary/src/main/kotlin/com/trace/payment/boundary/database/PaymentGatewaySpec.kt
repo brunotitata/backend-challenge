@@ -16,4 +16,6 @@ interface PaymentGatewaySpec {
         periodStart: Instant,
         checkLimit: (consumedAmount: BigDecimal) -> Boolean,
     ): PaymentEntity?
+
+    fun findById(paymentId: UUID): PaymentEntity?
 }

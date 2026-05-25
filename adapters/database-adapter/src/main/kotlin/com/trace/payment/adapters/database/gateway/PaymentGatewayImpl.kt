@@ -86,4 +86,24 @@ class PaymentGatewayImpl(
             )
         }
     }
+
+    override fun findById(paymentId: UUID): PaymentEntity? {
+        return dsl
+            .selectFrom(PAYMENTS)
+            .where(PAYMENTS.ID.eq(paymentId))
+            .fetchOne { record ->
+                PaymentEntity(
+                    id = record.get(PAYMENTS.ID),
+                    walletId = record.get(PAYMENTS.WALLET_ID),
+                    policyId = record.get(PAYMENTS.POLICY_ID),
+                    amount = record.get(PAYMENTS.AMOUNT),
+                    occurredAt = record.get(PAYMENTS.OCCURRED_AT).toInstant(),
+                    periodType = PeriodType.valueOf(record.get(PAYMENTS.PERIOD_TYPE)),
+                    periodStart = record.get(PAYMENTS.PERIOD_START).toInstant(),
+                    status = record.get(PAYMENTS.STATUS),
+                    createdAt = record.get(PAYMENTS.CREATED_AT).toInstant(),
+                    updatedAt = record.get(PAYMENTS.UPDATED_AT).toInstant(),
+                )
+            }
+    }
 }
