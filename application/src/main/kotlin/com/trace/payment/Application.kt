@@ -1,6 +1,7 @@
 package com.trace.payment
 
 import com.trace.payment.adapters.database.config.DatabaseFactory
+import com.trace.payment.adapters.database.config.JooqFactory
 import com.trace.payment.adapters.database.dao.PolicyDAOSpecImpl
 import com.trace.payment.adapters.database.dao.WalletDAOSpecImpl
 import com.trace.payment.adapters.web.configs.configureErrorHandling
@@ -20,9 +21,10 @@ import io.ktor.server.application.*
 fun main() {
     embeddedServer(Netty, port = System.getenv("PORT")?.toIntOrNull() ?: 8080) {
         val dataSource = DatabaseFactory.createFromEnv()
+        val dsl = JooqFactory.create(dataSource)
 
-        val walletDAO = WalletDAOSpecImpl(dataSource)
-        val policyDAO = PolicyDAOSpecImpl(dataSource)
+        val walletDAO = WalletDAOSpecImpl(dsl)
+        val policyDAO = PolicyDAOSpecImpl(dsl)
         val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO)
         val createPolicyUseCase = CreatePolicyUseCaseImpl(policyDAO)
         val listPoliciesUseCase = ListPoliciesUseCaseImpl(policyDAO)

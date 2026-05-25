@@ -1,6 +1,7 @@
 package com.trace.payment.application
 
 import com.trace.payment.adapters.database.config.DatabaseFactory
+import com.trace.payment.adapters.database.config.JooqFactory
 import com.trace.payment.adapters.database.dao.WalletDAOSpecImpl
 import com.trace.payment.adapters.web.configs.configureErrorHandling
 import com.trace.payment.adapters.web.configs.configureSerialization
@@ -12,6 +13,7 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.testing.*
+import org.jooq.DSLContext
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -28,6 +30,7 @@ import kotlin.test.assertTrue
 class WalletIntegrationTest {
 
     private lateinit var dataSource: DataSource
+    private lateinit var dsl: DSLContext
 
     @BeforeEach
     fun setUp() {
@@ -38,6 +41,7 @@ class WalletIntegrationTest {
                 password = postgres.password,
             ),
         )
+        dsl = JooqFactory.create(dataSource)
         dataSource.connection.use { connection ->
             connection.createStatement().use { statement ->
                 statement.execute("TRUNCATE TABLE wallet_policies, wallets RESTART IDENTITY CASCADE")
@@ -204,7 +208,7 @@ class WalletIntegrationTest {
     }
 
     private fun Application.configureTestWalletApplication() {
-        val walletDAO = WalletDAOSpecImpl(dataSource)
+        val walletDAO = WalletDAOSpecImpl(dsl)
         val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO)
 
         configureSerialization()

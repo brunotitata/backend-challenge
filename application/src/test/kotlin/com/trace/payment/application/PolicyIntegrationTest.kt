@@ -1,6 +1,7 @@
 package com.trace.payment.application
 
 import com.trace.payment.adapters.database.config.DatabaseFactory
+import com.trace.payment.adapters.database.config.JooqFactory
 import com.trace.payment.adapters.database.dao.PolicyDAOSpecImpl
 import com.trace.payment.adapters.database.dao.WalletDAOSpecImpl
 import com.trace.payment.adapters.web.configs.configureErrorHandling
@@ -19,6 +20,7 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.testing.*
+import org.jooq.DSLContext
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -37,6 +39,7 @@ import kotlin.test.assertTrue
 class PolicyIntegrationTest {
 
     private lateinit var dataSource: DataSource
+    private lateinit var dsl: DSLContext
     private lateinit var policyDAO: PolicyDAOSpecImpl
     private lateinit var walletDAO: WalletDAOSpecImpl
 
@@ -49,8 +52,9 @@ class PolicyIntegrationTest {
                 password = postgres.password,
             ),
         )
-        policyDAO = PolicyDAOSpecImpl(dataSource)
-        walletDAO = WalletDAOSpecImpl(dataSource)
+        dsl = JooqFactory.create(dataSource)
+        policyDAO = PolicyDAOSpecImpl(dsl)
+        walletDAO = WalletDAOSpecImpl(dsl)
         dataSource.connection.use { connection ->
             connection.createStatement().use { statement ->
                 statement.execute("TRUNCATE TABLE wallet_policies, policies, wallets RESTART IDENTITY CASCADE")
@@ -285,8 +289,8 @@ class PolicyIntegrationTest {
     }
 
     private fun Application.configureTestApplication() {
-        val walletDAO = WalletDAOSpecImpl(dataSource)
-        val policyDAO = PolicyDAOSpecImpl(dataSource)
+        val walletDAO = WalletDAOSpecImpl(dsl)
+        val policyDAO = PolicyDAOSpecImpl(dsl)
         val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO)
         val createPolicyUseCase = CreatePolicyUseCaseImpl(policyDAO)
         val listPoliciesUseCase = ListPoliciesUseCaseImpl(policyDAO)
@@ -305,14 +309,14 @@ class PolicyIntegrationTest {
     }
 
     private fun createWallet(ownerName: String): String {
-        val walletDAO = WalletDAOSpecImpl(dataSource)
+        val walletDAO = WalletDAOSpecImpl(dsl)
         val useCase = CreateWalletUseCaseSpecImpl(walletDAO)
         val wallet = useCase.execute(ownerName)
         return wallet.id.toString()
     }
 
     private fun createPolicy(name: String): String {
-        val policyDAO = PolicyDAOSpecImpl(dataSource)
+        val policyDAO = PolicyDAOSpecImpl(dsl)
         val useCase = CreatePolicyUseCaseImpl(policyDAO)
         val policy = useCase.execute(
             name = name,

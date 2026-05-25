@@ -1,126 +1,107 @@
 package com.trace.payment.adapters.database.dao
 
+import com.trace.payment.adapters.database.jooq.tables.Policies.POLICIES
+import com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES
+import com.trace.payment.adapters.database.jooq.tables.Wallets.WALLETS
 import com.trace.payment.boundary.database.WalletDAOSpec
 import com.trace.payment.core.entities.WalletEntity
-import java.sql.Connection
-import java.sql.Timestamp
+import org.jooq.DSLContext
+import org.jooq.impl.DSL
+import java.math.BigDecimal
+import java.time.ZoneOffset
 import java.util.UUID
-import javax.sql.DataSource
 
 class WalletDAOSpecImpl(
-    private val dataSource: DataSource,
+    private val dsl: DSLContext,
 ) : WalletDAOSpec {
 
     override fun save(wallet: WalletEntity): WalletEntity {
-
-        dataSource.connection.use { connection ->
-            connection.autoCommit = false
-            try {
-                ensureDefaultPolicy(connection)
-                val savedWallet = insertWallet(connection, wallet)
-                insertDefaultActivePolicy(connection, savedWallet.id)
-                connection.commit()
-                return savedWallet
-            } catch (cause: Throwable) {
-                connection.rollback()
-                throw cause
-            }
+        return dsl.transactionResult { configuration ->
+            val tx = DSL.using(configuration)
+            ensureDefaultPolicy(tx)
+            val savedWallet = insertWallet(tx, wallet)
+            insertDefaultActivePolicy(tx, savedWallet.id)
+            savedWallet
         }
-
     }
 
     override fun findActivePolicyName(walletId: UUID): String? {
-        dataSource.connection.use { connection ->
-            connection.prepareStatement(
-                """
-                SELECT p.name
-                FROM wallet_policies wp
-                JOIN policies p ON p.id = wp.policy_id
-                WHERE wp.wallet_id = ? AND wp.active = TRUE
-                """.trimIndent(),
-            ).use { statement ->
-                statement.setObject(1, walletId)
-                statement.executeQuery().use { resultSet ->
-                    return if (resultSet.next()) {
-                        resultSet.getString("name")
-                    } else {
-                        null
-                    }
-                }
-            }
-        }
+        return dsl
+            .select(POLICIES.NAME)
+            .from(WALLET_POLICIES)
+            .join(POLICIES).on(POLICIES.ID.eq(WALLET_POLICIES.POLICY_ID))
+            .where(WALLET_POLICIES.WALLET_ID.eq(walletId))
+            .and(WALLET_POLICIES.ACTIVE.eq(true))
+            .fetchOne(POLICIES.NAME)
     }
 
     override fun existsById(walletId: UUID): Boolean {
-        dataSource.connection.use { connection ->
-            connection.prepareStatement(
-                "SELECT 1 FROM wallets WHERE id = ?",
-            ).use { statement ->
-                statement.setObject(1, walletId)
-                statement.executeQuery().use { resultSet ->
-                    return resultSet.next()
-                }
-            }
-        }
+        return dsl.fetchExists(
+            dsl.selectOne()
+                .from(WALLETS)
+                .where(WALLETS.ID.eq(walletId)),
+        )
     }
 
-    private fun insertWallet(connection: Connection, wallet: WalletEntity): WalletEntity {
-        connection.prepareStatement(
-            """
-            INSERT INTO wallets (id, owner_name, created_at)
-            VALUES (?, ?, ?)
-            RETURNING id, created_at
-            """.trimIndent(),
-        ).use { statement ->
-            statement.setObject(1, wallet.id)
-            statement.setString(2, wallet.ownerName)
-            statement.setTimestamp(3, Timestamp.from(wallet.createdAt))
-            statement.executeQuery().use { resultSet ->
-                resultSet.next()
-                return WalletEntity(
-                    id = resultSet.getObject("id", UUID::class.java),
-                    ownerName = wallet.ownerName,
-                    createdAt = resultSet.getTimestamp("created_at").toInstant(),
+    private fun insertWallet(tx: DSLContext, wallet: WalletEntity): WalletEntity {
+        val record = tx
+            .insertInto(WALLETS)
+            .set(WALLETS.ID, wallet.id)
+            .set(WALLETS.OWNER_NAME, wallet.ownerName)
+            .set(WALLETS.CREATED_AT, wallet.createdAt.atOffset(ZoneOffset.UTC))
+            .returning(WALLETS.ID, WALLETS.CREATED_AT)
+            .fetchOne() ?: error("Wallet insert did not return a row")
+
+        return WalletEntity(
+            id = record.get(WALLETS.ID),
+            ownerName = wallet.ownerName,
+            createdAt = record.get(WALLETS.CREATED_AT).toInstant(),
+        )
+    }
+
+    private fun insertDefaultActivePolicy(tx: DSLContext, walletId: UUID) {
+        val affectedRows = tx
+            .insertInto(WALLET_POLICIES, WALLET_POLICIES.WALLET_ID, WALLET_POLICIES.POLICY_ID, WALLET_POLICIES.ACTIVE)
+            .select(
+                tx.select(
+                    DSL.`val`(walletId),
+                    POLICIES.ID,
+                    DSL.`val`(true),
                 )
-            }
+                    .from(POLICIES)
+                    .where(POLICIES.NAME.eq("DEFAULT_VALUE_LIMIT")),
+            )
+            .execute()
+
+        check(affectedRows == 1) {
+            "Default policy DEFAULT_VALUE_LIMIT not found"
         }
     }
 
-    private fun insertDefaultActivePolicy(connection: Connection, walletId: UUID) {
-        connection.prepareStatement(
-            """
-            INSERT INTO wallet_policies (wallet_id, policy_id, active)
-            SELECT ?, id, TRUE
-            FROM policies
-            WHERE name = 'DEFAULT_VALUE_LIMIT'
-            """.trimIndent(),
-        ).use { statement ->
-            statement.setObject(1, walletId)
-            val affectedRows = statement.executeUpdate()
-            check(affectedRows == 1) {
-                "Default policy DEFAULT_VALUE_LIMIT not found"
-            }
-        }
-    }
-
-    private fun ensureDefaultPolicy(connection: Connection) {
-        connection.prepareStatement(
-            """
-            INSERT INTO policies (
-                name,
-                category,
-                max_per_payment,
-                daytime_daily_limit,
-                nighttime_daily_limit,
-                weekend_daily_limit
+    private fun ensureDefaultPolicy(tx: DSLContext) {
+        tx.insertInto(POLICIES)
+            .columns(
+                POLICIES.NAME,
+                POLICIES.CATEGORY,
+                POLICIES.MAX_PER_PAYMENT,
+                POLICIES.DAYTIME_DAILY_LIMIT,
+                POLICIES.NIGHTTIME_DAILY_LIMIT,
+                POLICIES.WEEKEND_DAILY_LIMIT,
             )
-            SELECT 'DEFAULT_VALUE_LIMIT', 'VALUE_LIMIT', 1000.00, 4000.00, 1000.00, 1000.00
-            WHERE NOT EXISTS (
-                SELECT 1 FROM policies WHERE name = 'DEFAULT_VALUE_LIMIT'
+            .select(
+                tx.select(
+                    DSL.`val`("DEFAULT_VALUE_LIMIT"),
+                    DSL.`val`("VALUE_LIMIT"),
+                    DSL.`val`(BigDecimal("1000.00")),
+                    DSL.`val`(BigDecimal("4000.00")),
+                    DSL.`val`(BigDecimal("1000.00")),
+                    DSL.`val`(BigDecimal("1000.00")),
+                ).whereNotExists(
+                    tx.selectOne()
+                        .from(POLICIES)
+                        .where(POLICIES.NAME.eq("DEFAULT_VALUE_LIMIT")),
+                ),
             )
-            """.trimIndent(),
-        ).use { statement ->
-            statement.executeUpdate()
-        }
+            .execute()
     }
 }

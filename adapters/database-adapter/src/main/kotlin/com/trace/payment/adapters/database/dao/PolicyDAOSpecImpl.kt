@@ -1,159 +1,103 @@
 package com.trace.payment.adapters.database.dao
 
+import com.trace.payment.adapters.database.jooq.tables.Policies.POLICIES
+import com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES
 import com.trace.payment.boundary.database.PolicyDAOSpec
 import com.trace.payment.core.entities.PolicyEntity
-import java.sql.ResultSet
-import java.sql.Timestamp
-import java.time.Instant
+import org.jooq.DSLContext
+import org.jooq.Record
+import org.jooq.impl.DSL
+import java.time.ZoneOffset
 import java.util.UUID
-import javax.sql.DataSource
 
 class PolicyDAOSpecImpl(
-    private val dataSource: DataSource,
+    private val dsl: DSLContext,
 ) : PolicyDAOSpec {
 
     override fun save(policy: PolicyEntity): PolicyEntity {
-        dataSource.connection.use { connection ->
-            connection.prepareStatement(
-                """
-                INSERT INTO policies (id, name, category, max_per_payment, daytime_daily_limit, nighttime_daily_limit, weekend_daily_limit, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                RETURNING *
-                """.trimIndent(),
-            ).use { statement ->
-                statement.setObject(1, policy.id)
-                statement.setString(2, policy.name)
-                statement.setString(3, policy.category)
-                statement.setBigDecimal(4, policy.maxPerPayment)
-                statement.setBigDecimal(5, policy.daytimeDailyLimit)
-                statement.setBigDecimal(6, policy.nighttimeDailyLimit)
-                statement.setBigDecimal(7, policy.weekendDailyLimit)
-                statement.setTimestamp(8, Timestamp.from(policy.createdAt))
-                statement.setTimestamp(9, Timestamp.from(policy.updatedAt))
-                statement.executeQuery().use { resultSet ->
-                    resultSet.next()
-                    return mapToPolicyEntity(resultSet)
-                }
-            }
-        }
+        val record = dsl
+            .insertInto(POLICIES)
+            .set(POLICIES.ID, policy.id)
+            .set(POLICIES.NAME, policy.name)
+            .set(POLICIES.CATEGORY, policy.category)
+            .set(POLICIES.MAX_PER_PAYMENT, policy.maxPerPayment)
+            .set(POLICIES.DAYTIME_DAILY_LIMIT, policy.daytimeDailyLimit)
+            .set(POLICIES.NIGHTTIME_DAILY_LIMIT, policy.nighttimeDailyLimit)
+            .set(POLICIES.WEEKEND_DAILY_LIMIT, policy.weekendDailyLimit)
+            .set(POLICIES.DAILY_TRANSACTION_LIMIT, policy.dailyTransactionLimit)
+            .set(POLICIES.CREATED_AT, policy.createdAt.atOffset(ZoneOffset.UTC))
+            .set(POLICIES.UPDATED_AT, policy.updatedAt.atOffset(ZoneOffset.UTC))
+            .returning()
+            .fetchOne() ?: error("Policy insert did not return a row")
+
+        return mapToPolicyEntity(record)
     }
 
     override fun findAll(): List<PolicyEntity> {
-        dataSource.connection.use { connection ->
-            connection.prepareStatement(
-                "SELECT * FROM policies ORDER BY created_at DESC",
-            ).use { statement ->
-                statement.executeQuery().use { resultSet ->
-                    val policies = mutableListOf<PolicyEntity>()
-                    while (resultSet.next()) {
-                        policies.add(mapToPolicyEntity(resultSet))
-                    }
-                    return policies
-                }
-            }
-        }
+        return dsl
+            .selectFrom(POLICIES)
+            .orderBy(POLICIES.CREATED_AT.desc())
+            .fetch { mapToPolicyEntity(it) }
     }
 
     override fun findByWalletId(walletId: UUID): List<PolicyEntity> {
-        dataSource.connection.use { connection ->
-            connection.prepareStatement(
-                """
-                SELECT p.*, wp.active
-                FROM policies p
-                JOIN wallet_policies wp ON wp.policy_id = p.id
-                WHERE wp.wallet_id = ?
-                ORDER BY wp.created_at DESC
-                """.trimIndent(),
-            ).use { statement ->
-                statement.setObject(1, walletId)
-                statement.executeQuery().use { resultSet ->
-                    val policies = mutableListOf<PolicyEntity>()
-                    while (resultSet.next()) {
-                        policies.add(mapToPolicyEntity(resultSet, resultSet.getBoolean("active")))
-                    }
-                    return policies
-                }
-            }
-        }
+        return dsl
+            .select(POLICIES.fields().toList() + WALLET_POLICIES.ACTIVE)
+            .from(POLICIES)
+            .join(WALLET_POLICIES).on(WALLET_POLICIES.POLICY_ID.eq(POLICIES.ID))
+            .where(WALLET_POLICIES.WALLET_ID.eq(walletId))
+            .orderBy(WALLET_POLICIES.CREATED_AT.desc())
+            .fetch { mapToPolicyEntity(it, it.get(WALLET_POLICIES.ACTIVE)) }
     }
 
     override fun findById(policyId: UUID): PolicyEntity? {
-        dataSource.connection.use { connection ->
-            connection.prepareStatement(
-                "SELECT * FROM policies WHERE id = ?",
-            ).use { statement ->
-                statement.setObject(1, policyId)
-                statement.executeQuery().use { resultSet ->
-                    return if (resultSet.next()) mapToPolicyEntity(resultSet) else null
-                }
-            }
-        }
+        return dsl
+            .selectFrom(POLICIES)
+            .where(POLICIES.ID.eq(policyId))
+            .fetchOne { mapToPolicyEntity(it) }
     }
 
     override fun findActiveByWalletId(walletId: UUID): PolicyEntity? {
-        dataSource.connection.use { connection ->
-            connection.prepareStatement(
-                """
-                SELECT p.*
-                FROM wallet_policies wp
-                JOIN policies p ON p.id = wp.policy_id
-                WHERE wp.wallet_id = ? AND wp.active = TRUE
-                """.trimIndent(),
-            ).use { statement ->
-                statement.setObject(1, walletId)
-                statement.executeQuery().use { resultSet ->
-                    return if (resultSet.next()) mapToPolicyEntity(resultSet) else null
-                }
-            }
-        }
+        return dsl
+            .select(POLICIES.fields().toList())
+            .from(WALLET_POLICIES)
+            .join(POLICIES).on(POLICIES.ID.eq(WALLET_POLICIES.POLICY_ID))
+            .where(WALLET_POLICIES.WALLET_ID.eq(walletId))
+            .and(WALLET_POLICIES.ACTIVE.eq(true))
+            .fetchOne { mapToPolicyEntity(it) }
     }
 
     override fun assignPolicy(walletId: UUID, policyId: UUID) {
-        dataSource.connection.use { connection ->
-            connection.autoCommit = false
-            try {
-                connection.prepareStatement(
-                    "UPDATE wallet_policies SET active = FALSE WHERE wallet_id = ? AND active = TRUE",
-                ).use { statement ->
-                    statement.setObject(1, walletId)
-                    statement.executeUpdate()
-                }
+        dsl.transaction { configuration ->
+            val tx = DSL.using(configuration)
 
-                connection.prepareStatement(
-                    """
-                    INSERT INTO wallet_policies (wallet_id, policy_id, active)
-                    VALUES (?, ?, TRUE)
-                    """.trimIndent(),
-                ).use { statement ->
-                    statement.setObject(1, walletId)
-                    statement.setObject(2, policyId)
-                    statement.executeUpdate()
-                }
+            tx.update(WALLET_POLICIES)
+                .set(WALLET_POLICIES.ACTIVE, false)
+                .where(WALLET_POLICIES.WALLET_ID.eq(walletId))
+                .and(WALLET_POLICIES.ACTIVE.eq(true))
+                .execute()
 
-                connection.commit()
-            } catch (cause: Throwable) {
-                connection.rollback()
-                throw cause
-            }
+            tx.insertInto(WALLET_POLICIES)
+                .set(WALLET_POLICIES.WALLET_ID, walletId)
+                .set(WALLET_POLICIES.POLICY_ID, policyId)
+                .set(WALLET_POLICIES.ACTIVE, true)
+                .execute()
         }
     }
 
-    private fun mapToPolicyEntity(resultSet: ResultSet, active: Boolean? = null): PolicyEntity {
+    private fun mapToPolicyEntity(record: Record, active: Boolean? = null): PolicyEntity {
         return PolicyEntity(
-            id = resultSet.getObject("id", UUID::class.java),
-            name = resultSet.getString("name"),
-            category = resultSet.getString("category"),
-            maxPerPayment = resultSet.getBigDecimal("max_per_payment"),
-            daytimeDailyLimit = resultSet.getBigDecimal("daytime_daily_limit"),
-            nighttimeDailyLimit = resultSet.getBigDecimal("nighttime_daily_limit"),
-            weekendDailyLimit = resultSet.getBigDecimal("weekend_daily_limit"),
-            dailyTransactionLimit = {
-                val v = resultSet.getInt("daily_transaction_limit")
-                if (resultSet.wasNull()) null else v
-            }(),
+            id = record.get(POLICIES.ID),
+            name = record.get(POLICIES.NAME),
+            category = record.get(POLICIES.CATEGORY),
+            maxPerPayment = record.get(POLICIES.MAX_PER_PAYMENT),
+            daytimeDailyLimit = record.get(POLICIES.DAYTIME_DAILY_LIMIT),
+            nighttimeDailyLimit = record.get(POLICIES.NIGHTTIME_DAILY_LIMIT),
+            weekendDailyLimit = record.get(POLICIES.WEEKEND_DAILY_LIMIT),
+            dailyTransactionLimit = record.get(POLICIES.DAILY_TRANSACTION_LIMIT),
             active = active,
-            createdAt = resultSet.getTimestamp("created_at").toInstant(),
-            updatedAt = resultSet.getTimestamp("updated_at").toInstant(),
+            createdAt = record.get(POLICIES.CREATED_AT).toInstant(),
+            updatedAt = record.get(POLICIES.UPDATED_AT).toInstant(),
         )
     }
 }
