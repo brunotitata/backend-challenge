@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Idempotencia via Idempotency-Key
 O sistema DEVE implementar idempotencia em `POST /wallets/{walletId}/payments` utilizando o header HTTP `Idempotency-Key`. A chave DEVE ser obrigatoria e unica por carteira. A garantia de unicidade DEVE ser feita por constraint unique no banco. A checagem e o registro da chave idempotente DEVEM ocorrer dentro da mesma transacao do pagamento, utilizando `INSERT ... ON CONFLICT DO NOTHING` para atomicidade.

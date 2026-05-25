@@ -2,7 +2,6 @@ package com.trace.payment.application
 
 import com.trace.payment.adapters.database.config.DatabaseFactory
 import com.trace.payment.adapters.database.config.JooqFactory
-import com.trace.payment.adapters.database.dao.IdempotencyRepositoryImpl
 import com.trace.payment.adapters.database.dao.PolicyDAOSpecImpl
 import com.trace.payment.adapters.database.dao.WalletDAOSpecImpl
 import com.trace.payment.adapters.database.gateway.PaymentGatewayImpl
@@ -26,6 +25,8 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.server.application.*
+import io.ktor.server.engine.*
+import io.ktor.server.netty.*
 import io.ktor.server.testing.*
 import org.jooq.DSLContext
 import org.jooq.exception.DataAccessException
@@ -40,6 +41,13 @@ import javax.sql.DataSource
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.BeforeAll
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -525,6 +533,247 @@ class PaymentIntegrationTest {
     }
 
     @Test
+    fun `concurrent 700+700 with 1000 limit approves only one`() {
+        val walletId = createWallet("ConcurrentWallet")
+        val httpClient = HttpClient.newHttpClient()
+
+        fun postPayment(key: String, amount: String, time: String): HttpResponse<String> = httpClient.send(
+            HttpRequest.newBuilder()
+                .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                .header("Content-Type", "application/json")
+                .header("Idempotency-Key", key)
+                .method("POST", HttpRequest.BodyPublishers.ofString("""{"amount":$amount,"occurredAt":"2024-08-26T$time"}"""))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(),
+        )
+
+        assertEquals(201, postPayment("pre-consume-concurrent-1", "1000.00", "10:00:00.0000Z").statusCode())
+        assertEquals(201, postPayment("pre-consume-concurrent-2", "1000.00", "11:00:00.0000Z").statusCode())
+        assertEquals(201, postPayment("pre-consume-concurrent-3", "1000.00", "12:00:00.0000Z").statusCode())
+
+        val executor = Executors.newFixedThreadPool(2)
+
+        val futures = listOf(
+            executor.submit<HttpResponse<String>> {
+                httpClient.send(
+                    HttpRequest.newBuilder()
+                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                        .header("Content-Type", "application/json")
+                        .header("Idempotency-Key", "concurrent-700-a")
+                        .method("POST", HttpRequest.BodyPublishers.ofString("""{"amount":700.00,"occurredAt":"2024-08-26T13:00:00.0000Z"}"""))
+                        .build(),
+                    HttpResponse.BodyHandlers.ofString(),
+                )
+            },
+            executor.submit<HttpResponse<String>> {
+                httpClient.send(
+                    HttpRequest.newBuilder()
+                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                        .header("Content-Type", "application/json")
+                        .header("Idempotency-Key", "concurrent-700-b")
+                        .method("POST", HttpRequest.BodyPublishers.ofString("""{"amount":700.00,"occurredAt":"2024-08-26T13:00:00.0000Z"}"""))
+                        .build(),
+                    HttpResponse.BodyHandlers.ofString(),
+                )
+            },
+        )
+
+        executor.shutdown()
+        executor.awaitTermination(10, TimeUnit.SECONDS)
+
+        val results = futures.map { it.get() }
+        val approved = results.count { it.statusCode() == 201 }
+        val rejected = results.count { it.statusCode() == 422 }
+
+        assertEquals(1, approved, "Exactly one payment should be approved")
+        assertEquals(1, rejected, "Exactly one payment should be rejected")
+    }
+
+    @Test
+    fun `concurrent payments without previous limit_consumptions row`() {
+        val httpClient = HttpClient.newHttpClient()
+        val executor = Executors.newFixedThreadPool(2)
+
+        val policyId = httpClient.send(
+            HttpRequest.newBuilder()
+                .uri(java.net.URI.create("http://localhost:$port/policies"))
+                .header("Content-Type", "application/json")
+                .method("POST", HttpRequest.BodyPublishers.ofString(
+                    """{"name":"CONCURRENT_TEST","category":"VALUE_LIMIT","maxPerPayment":"5000.00","daytimeDailyLimit":"4000.00","nighttimeDailyLimit":"1000.00","weekendDailyLimit":"1000.00"}"""
+                ))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(),
+        ).body().let { body ->
+            Regex(""""id":"([^"]+)"""").find(body)?.groupValues?.get(1)
+                ?: error("Could not parse policy id from: $body")
+        }
+
+        val walletId = createWallet("FreshWallet")
+
+        httpClient.send(
+            HttpRequest.newBuilder()
+                .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/policy"))
+                .header("Content-Type", "application/json")
+                .method("PUT", HttpRequest.BodyPublishers.ofString("""{"policyId":"$policyId"}"""))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(),
+        )
+
+        fun postPayment(key: String, amount: String): HttpResponse<String> = httpClient.send(
+            HttpRequest.newBuilder()
+                .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                .header("Content-Type", "application/json")
+                .header("Idempotency-Key", key)
+                .method("POST", HttpRequest.BodyPublishers.ofString("""{"amount":$amount,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(),
+        )
+
+        val futures = listOf(
+            executor.submit<HttpResponse<String>> { postPayment("fresh-concurrent-a", "2500.00") },
+            executor.submit<HttpResponse<String>> { postPayment("fresh-concurrent-b", "2500.00") },
+        )
+
+        executor.shutdown()
+        executor.awaitTermination(10, TimeUnit.SECONDS)
+
+        val results = futures.map { it.get() }
+        val approved = results.count { it.statusCode() == 201 }
+        val rejected = results.count { it.statusCode() == 422 }
+
+        assertEquals(1, approved, "Exactly one concurrent payment should be approved (2500 < 4000)")
+        assertEquals(1, rejected, "Exactly one concurrent payment should be rejected (2500+2500 > 4000)")
+    }
+
+    @Test
+    fun `concurrent idempotency with same key and payload returns same paymentId`() {
+        val walletId = createWallet("IdempotentWallet")
+
+        val executor = Executors.newFixedThreadPool(2)
+        val httpClient = HttpClient.newHttpClient()
+
+        val futures = listOf(
+            executor.submit<java.net.http.HttpResponse<String>> {
+                httpClient.send(
+                    java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                        .header("Content-Type", "application/json")
+                        .header("Idempotency-Key", "concurrent-idem-key")
+                        .method("POST",                     HttpRequest.BodyPublishers.ofString("""{"amount":500.00,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
+                        .build(),
+                    HttpResponse.BodyHandlers.ofString(),
+                )
+            },
+            executor.submit<java.net.http.HttpResponse<String>> {
+                httpClient.send(
+                    java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                        .header("Content-Type", "application/json")
+                        .header("Idempotency-Key", "concurrent-idem-key")
+                        .method("POST",                     HttpRequest.BodyPublishers.ofString("""{"amount":500.00,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
+                        .build(),
+                    HttpResponse.BodyHandlers.ofString(),
+                )
+            },
+        )
+
+        executor.shutdown()
+        executor.awaitTermination(10, TimeUnit.SECONDS)
+
+        val results = futures.map { it.get() }
+        assertEquals(2, results.size)
+        results.forEach {
+            assertEquals(201, it.statusCode(), "Both requests should return 201")
+        }
+        assertEquals(results[0].body(), results[1].body(), "Both responses should have same body (same paymentId)")
+    }
+
+    @Test
+    fun `concurrent idempotency with same key and different payload returns 409`() {
+        val walletId = createWallet("ConflictWallet")
+
+        val executor = Executors.newFixedThreadPool(2)
+        val httpClient = HttpClient.newHttpClient()
+
+        val futures = listOf(
+            executor.submit<java.net.http.HttpResponse<String>> {
+                httpClient.send(
+                    java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                        .header("Content-Type", "application/json")
+                        .header("Idempotency-Key", "concurrent-conflict-key")
+                        .method("POST",                     HttpRequest.BodyPublishers.ofString("""{"amount":500.00,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
+                        .build(),
+                    HttpResponse.BodyHandlers.ofString(),
+                )
+            },
+            executor.submit<java.net.http.HttpResponse<String>> {
+                httpClient.send(
+                    java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                        .header("Content-Type", "application/json")
+                        .header("Idempotency-Key", "concurrent-conflict-key")
+                        .method("POST",                     HttpRequest.BodyPublishers.ofString("""{"amount":600.00,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
+                        .build(),
+                    HttpResponse.BodyHandlers.ofString(),
+                )
+            },
+        )
+
+        executor.shutdown()
+        executor.awaitTermination(10, TimeUnit.SECONDS)
+
+        val results = futures.map { it.get() }
+        val hasSuccess = results.any { it.statusCode() == 201 }
+        val hasConflict = results.any { it.statusCode() == 409 }
+
+        assertTrue(hasSuccess, "One request should succeed")
+        assertTrue(hasConflict, "One request should return 409 Conflict")
+    }
+
+    @Test
+    fun `concurrent payments for different wallets both succeed`() {
+        val walletA = createWallet("WalletA")
+        val walletB = createWallet("WalletB")
+
+        val executor = Executors.newFixedThreadPool(2)
+        val httpClient = HttpClient.newHttpClient()
+
+        val futures = listOf(
+            executor.submit<java.net.http.HttpResponse<String>> {
+                httpClient.send(
+                    java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletA/payments"))
+                        .header("Content-Type", "application/json")
+                        .header("Idempotency-Key", "wallet-a-concurrent")
+                        .method("POST",                     HttpRequest.BodyPublishers.ofString("""{"amount":1000.00,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
+                        .build(),
+                    HttpResponse.BodyHandlers.ofString(),
+                )
+            },
+            executor.submit<java.net.http.HttpResponse<String>> {
+                httpClient.send(
+                    java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletB/payments"))
+                        .header("Content-Type", "application/json")
+                        .header("Idempotency-Key", "wallet-b-concurrent")
+                        .method("POST",                     HttpRequest.BodyPublishers.ofString("""{"amount":1000.00,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
+                        .build(),
+                    HttpResponse.BodyHandlers.ofString(),
+                )
+            },
+        )
+
+        executor.shutdown()
+        executor.awaitTermination(10, TimeUnit.SECONDS)
+
+        val results = futures.map { it.get() }
+        results.forEachIndexed { index, response ->
+            assertEquals(201, response.statusCode(), "Payment for wallet ${if (index == 0) 'A' else 'B'} should succeed")
+        }
+    }
+
+    @Test
     fun `unique constraint prevents duplicate idempotency key insertion`() = testApplication {
         application { configureTestApplication() }
 
@@ -571,33 +820,7 @@ class PaymentIntegrationTest {
     }
 
     private fun Application.configureTestApplication() {
-        val walletDAO = WalletDAOSpecImpl(dsl)
-        val policyDAO = PolicyDAOSpecImpl(dsl)
-        val paymentGateway = PaymentGatewayImpl(dsl)
-        val idempotencyRepository = IdempotencyRepositoryImpl(dsl)
-
-        val policyResolver = PolicyResolverImpl(policyDAO)
-        val policyRegistry = PolicyEvaluatorRegistryImpl().apply {
-            register("VALUE_LIMIT", ValueLimitEvaluator())
-        }
-
-        val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO)
-        val createPolicyUseCase = CreatePolicyUseCaseImpl(policyDAO)
-        val listPoliciesUseCase = ListPoliciesUseCaseImpl(policyDAO)
-        val listWalletPoliciesUseCase = ListWalletPoliciesUseCaseImpl(policyDAO, walletDAO)
-        val assignPolicyUseCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO)
-        val processPaymentUseCase = ProcessPaymentUseCaseImpl(walletDAO, policyResolver, policyRegistry, paymentGateway, idempotencyRepository)
-
-        configureSerialization()
-        configureErrorHandling()
-        configureWalletRoutes(createWalletUseCase)
-        configurePolicyRoutes(
-            createPolicyUseCase = createPolicyUseCase,
-            listPoliciesUseCase = listPoliciesUseCase,
-            listWalletPoliciesUseCase = listWalletPoliciesUseCase,
-            assignPolicyUseCase = assignPolicyUseCase,
-        )
-        configurePaymentRoutes(processPaymentUseCase)
+        configureApplication(dsl)
     }
 
     private fun createWallet(ownerName: String): String {
@@ -611,5 +834,62 @@ class PaymentIntegrationTest {
         @Container
         @JvmField
         val postgres = PostgreSQLContainer<Nothing>("postgres:16-alpine")
+
+        var port: Int = 0
+            private set
+
+        private var server: ApplicationEngine? = null
+
+        @BeforeAll
+        @JvmStatic
+        fun startServer() {
+            val dataSource = DatabaseFactory.create(
+                DatabaseConfigBO(
+                    url = postgres.jdbcUrl,
+                    username = postgres.username,
+                    password = postgres.password,
+                ),
+            )
+            val dsl = JooqFactory.create(dataSource)
+            port = java.net.ServerSocket(0).use { it.localPort }
+            server = embeddedServer(Netty, port = port) {
+                configureApplication(dsl)
+            }.start(wait = false)
+        }
+
+        @AfterAll
+        @JvmStatic
+        fun stopServer() {
+            server?.stop(1000, 2000)
+        }
     }
+}
+
+private fun Application.configureApplication(dsl: DSLContext) {
+    val walletDAO = WalletDAOSpecImpl(dsl)
+    val policyDAO = PolicyDAOSpecImpl(dsl)
+    val paymentGateway = PaymentGatewayImpl(dsl)
+
+    val policyResolver = PolicyResolverImpl(policyDAO)
+    val policyRegistry = PolicyEvaluatorRegistryImpl().apply {
+        register("VALUE_LIMIT", ValueLimitEvaluator())
+    }
+
+    val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO)
+    val createPolicyUseCase = CreatePolicyUseCaseImpl(policyDAO)
+    val listPoliciesUseCase = ListPoliciesUseCaseImpl(policyDAO)
+    val listWalletPoliciesUseCase = ListWalletPoliciesUseCaseImpl(policyDAO, walletDAO)
+    val assignPolicyUseCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO)
+    val processPaymentUseCase = ProcessPaymentUseCaseImpl(walletDAO, policyResolver, policyRegistry, paymentGateway)
+
+    configureSerialization()
+    configureErrorHandling()
+    configureWalletRoutes(createWalletUseCase)
+    configurePolicyRoutes(
+        createPolicyUseCase = createPolicyUseCase,
+        listPoliciesUseCase = listPoliciesUseCase,
+        listWalletPoliciesUseCase = listWalletPoliciesUseCase,
+        assignPolicyUseCase = assignPolicyUseCase,
+    )
+    configurePaymentRoutes(processPaymentUseCase)
 }

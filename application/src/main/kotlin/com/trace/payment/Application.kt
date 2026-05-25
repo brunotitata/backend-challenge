@@ -2,7 +2,6 @@ package com.trace.payment
 
 import com.trace.payment.adapters.database.config.DatabaseFactory
 import com.trace.payment.adapters.database.config.JooqFactory
-import com.trace.payment.adapters.database.dao.IdempotencyRepositoryImpl
 import com.trace.payment.adapters.database.dao.PolicyDAOSpecImpl
 import com.trace.payment.adapters.database.dao.WalletDAOSpecImpl
 import com.trace.payment.adapters.database.gateway.PaymentGatewayImpl
@@ -33,7 +32,6 @@ fun main() {
         val walletDAO = WalletDAOSpecImpl(dsl)
         val policyDAO = PolicyDAOSpecImpl(dsl)
         val paymentGateway = PaymentGatewayImpl(dsl)
-        val idempotencyRepository = IdempotencyRepositoryImpl(dsl)
 
         val policyResolver = PolicyResolverImpl(policyDAO)
         val policyRegistry = PolicyEvaluatorRegistryImpl().apply {
@@ -45,7 +43,7 @@ fun main() {
         val listPoliciesUseCase = ListPoliciesUseCaseImpl(policyDAO)
         val listWalletPoliciesUseCase = ListWalletPoliciesUseCaseImpl(policyDAO, walletDAO)
         val assignPolicyUseCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO)
-        val processPaymentUseCase = ProcessPaymentUseCaseImpl(walletDAO, policyResolver, policyRegistry, paymentGateway, idempotencyRepository)
+        val processPaymentUseCase = ProcessPaymentUseCaseImpl(walletDAO, policyResolver, policyRegistry, paymentGateway)
 
         configureSerialization()
         configureErrorHandling()

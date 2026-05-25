@@ -14,8 +14,10 @@ interface PaymentGatewaySpec {
         occurredAt: Instant,
         periodType: PeriodType,
         periodStart: Instant,
+        idempotencyKey: String,
+        requestHash: String,
         checkLimit: (consumedAmount: BigDecimal) -> Boolean,
-    ): PaymentEntity?
+    ): TransactionResult
 
     fun findById(paymentId: UUID): PaymentEntity?
 }
