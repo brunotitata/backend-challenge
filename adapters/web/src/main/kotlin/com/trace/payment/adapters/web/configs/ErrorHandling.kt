@@ -3,12 +3,14 @@ package com.trace.payment.adapters.web.configs
 import com.trace.payment.adapters.web.dtos.ErrorDTO
 import com.trace.payment.adapters.web.dtos.ErrorResponseDTO
 import com.trace.payment.boundary.exceptions.NotFoundException
+import com.trace.payment.boundary.exceptions.UnprocessableEntityException
 import com.trace.payment.boundary.exceptions.ValidationException
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.plugins.*
 import io.ktor.server.plugins.statuspages.*
 import io.ktor.server.response.*
+import java.time.format.DateTimeParseException
 
 fun Application.configureErrorHandling() {
     install(StatusPages) {
@@ -33,10 +35,31 @@ fun Application.configureErrorHandling() {
             )
         }
 
+        exception<UnprocessableEntityException> { call, cause ->
+            call.respond(
+                HttpStatusCode.UnprocessableEntity,
+                ErrorResponseDTO(error = ErrorDTO(code = "UNPROCESSABLE_ENTITY", message = cause.message ?: "Unprocessable entity")),
+            )
+        }
+
         exception<IllegalArgumentException> { call, cause ->
             call.respond(
                 HttpStatusCode.BadRequest,
                 ErrorResponseDTO(error = ErrorDTO(code = "BAD_REQUEST", message = cause.message ?: "Invalid input")),
+            )
+        }
+
+        exception<DateTimeParseException> { call, cause ->
+            call.respond(
+                HttpStatusCode.BadRequest,
+                ErrorResponseDTO(error = ErrorDTO(code = "BAD_REQUEST", message = "Invalid date format")),
+            )
+        }
+
+        exception<NumberFormatException> { call, cause ->
+            call.respond(
+                HttpStatusCode.BadRequest,
+                ErrorResponseDTO(error = ErrorDTO(code = "BAD_REQUEST", message = "Invalid number format")),
             )
         }
 

@@ -4,9 +4,11 @@ import com.trace.payment.adapters.database.config.DatabaseFactory
 import com.trace.payment.adapters.database.config.JooqFactory
 import com.trace.payment.adapters.database.dao.PolicyDAOSpecImpl
 import com.trace.payment.adapters.database.dao.WalletDAOSpecImpl
+import com.trace.payment.adapters.database.gateway.PaymentGatewayImpl
 import com.trace.payment.adapters.web.configs.configureErrorHandling
 import com.trace.payment.adapters.web.configs.configureSerialization
 import com.trace.payment.adapters.web.routes.configureHealthRoutes
+import com.trace.payment.adapters.web.routes.configurePaymentRoutes
 import com.trace.payment.adapters.web.routes.configurePolicyRoutes
 import com.trace.payment.adapters.web.routes.configureWalletRoutes
 import com.trace.payment.core.usecase.AssignPolicyUseCaseImpl
@@ -14,6 +16,10 @@ import com.trace.payment.core.usecase.CreatePolicyUseCaseImpl
 import com.trace.payment.core.usecase.CreateWalletUseCaseSpecImpl
 import com.trace.payment.core.usecase.ListPoliciesUseCaseImpl
 import com.trace.payment.core.usecase.ListWalletPoliciesUseCaseImpl
+import com.trace.payment.core.usecase.PolicyEvaluatorRegistryImpl
+import com.trace.payment.core.usecase.PolicyResolverImpl
+import com.trace.payment.core.usecase.ProcessPaymentUseCaseImpl
+import com.trace.payment.core.usecase.ValueLimitEvaluator
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.application.*
@@ -25,11 +31,19 @@ fun main() {
 
         val walletDAO = WalletDAOSpecImpl(dsl)
         val policyDAO = PolicyDAOSpecImpl(dsl)
+        val paymentGateway = PaymentGatewayImpl(dsl)
+
+        val policyResolver = PolicyResolverImpl(policyDAO)
+        val policyRegistry = PolicyEvaluatorRegistryImpl().apply {
+            register("VALUE_LIMIT", ValueLimitEvaluator())
+        }
+
         val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO)
         val createPolicyUseCase = CreatePolicyUseCaseImpl(policyDAO)
         val listPoliciesUseCase = ListPoliciesUseCaseImpl(policyDAO)
         val listWalletPoliciesUseCase = ListWalletPoliciesUseCaseImpl(policyDAO, walletDAO)
         val assignPolicyUseCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO)
+        val processPaymentUseCase = ProcessPaymentUseCaseImpl(walletDAO, policyResolver, policyRegistry, paymentGateway)
 
         configureSerialization()
         configureErrorHandling()
@@ -41,5 +55,6 @@ fun main() {
             listWalletPoliciesUseCase = listWalletPoliciesUseCase,
             assignPolicyUseCase = assignPolicyUseCase,
         )
+        configurePaymentRoutes(processPaymentUseCase)
     }.start(wait = true)
 }

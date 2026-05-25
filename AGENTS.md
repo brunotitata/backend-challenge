@@ -48,3 +48,21 @@ Transformacoes esperadas:
 | `inputadapter` | `input-adapter` |
 
 Excecao tecnica: packages Kotlin nao podem conter `-`. Nesses casos, manter o `package` com identificadores Kotlin validos e aplicar kebab-case no caminho fisico das pastas e na documentacao arquitetural.
+
+## Estilo Kotlin
+
+Evitar nomes totalmente qualificados no corpo do codigo Kotlin quando a classe pode ser importada normalmente.
+
+Exemplo correto:
+
+```kotlin
+import io.ktor.server.plugins.BadRequestException
+
+throw BadRequestException("amount is required")
+```
+
+Exemplo incorreto:
+
+```kotlin
+throw io.ktor.server.plugins.BadRequestException("amount is required")
+```
