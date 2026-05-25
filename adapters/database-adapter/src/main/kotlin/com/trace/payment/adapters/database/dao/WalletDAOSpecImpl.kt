@@ -51,6 +51,19 @@ class WalletDAOSpecImpl(
         }
     }
 
+    override fun existsById(walletId: UUID): Boolean {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT 1 FROM wallets WHERE id = ?",
+            ).use { statement ->
+                statement.setObject(1, walletId)
+                statement.executeQuery().use { resultSet ->
+                    return resultSet.next()
+                }
+            }
+        }
+    }
+
     private fun insertWallet(connection: Connection, wallet: WalletEntity): WalletEntity {
         connection.prepareStatement(
             """

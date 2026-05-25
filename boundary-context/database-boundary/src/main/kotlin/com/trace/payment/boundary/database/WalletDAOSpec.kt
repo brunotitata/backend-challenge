@@ -6,4 +6,5 @@ import java.util.UUID
 interface WalletDAOSpec {
     fun save(wallet: WalletEntity): WalletEntity
     fun findActivePolicyName(walletId: UUID): String?
+    fun existsById(walletId: UUID): Boolean
 }

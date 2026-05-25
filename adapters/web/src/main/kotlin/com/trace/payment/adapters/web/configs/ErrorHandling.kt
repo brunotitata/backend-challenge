@@ -2,6 +2,7 @@ package com.trace.payment.adapters.web.configs
 
 import com.trace.payment.adapters.web.dtos.ErrorDTO
 import com.trace.payment.adapters.web.dtos.ErrorResponseDTO
+import com.trace.payment.boundary.exceptions.NotFoundException
 import com.trace.payment.boundary.exceptions.ValidationException
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -18,10 +19,24 @@ fun Application.configureErrorHandling() {
             )
         }
 
+        exception<NotFoundException> { call, cause ->
+            call.respond(
+                HttpStatusCode.NotFound,
+                ErrorResponseDTO(error = ErrorDTO(code = "NOT_FOUND", message = cause.message ?: "Resource not found")),
+            )
+        }
+
         exception<BadRequestException> { call, cause ->
             call.respond(
                 HttpStatusCode.BadRequest,
                 ErrorResponseDTO(error = ErrorDTO(code = "BAD_REQUEST", message = cause.message ?: "Invalid request body")),
+            )
+        }
+
+        exception<IllegalArgumentException> { call, cause ->
+            call.respond(
+                HttpStatusCode.BadRequest,
+                ErrorResponseDTO(error = ErrorDTO(code = "BAD_REQUEST", message = cause.message ?: "Invalid input")),
             )
         }
 
