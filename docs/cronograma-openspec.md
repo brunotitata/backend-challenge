@@ -86,7 +86,10 @@ Estes requisitos devem ser considerados em todas as fatias aplicaveis.
 
 - O candidato pode escolher o banco de dados.
 - Este cronograma recomenda PostgreSQL para facilitar transacoes, constraints, indices unicos e consistencia concorrente.
+- As operacoes de persistencia e queries da aplicacao devem usar jOOQ com schema gerado a partir das migracoes, evitando JDBC manual em codigo de producao.
+- O `design.md` de cada fatia que criar ou alterar persistencia deve indicar as tabelas envolvidas, os indices necessarios, as transacoes esperadas e quais queries serao implementadas com jOOQ.
 - O README tecnico final deve justificar a escolha do PostgreSQL e explicar o trade-off em relacao ao diferencial citado no desafio de Docker Compose com MongoDB.
+- O README tecnico final deve documentar o uso do jOOQ para tipagem forte de queries, geracao de schema e organizacao da camada de acesso a dados.
 - Todas as tabelas, constraints e indices devem ser criados por script ou migracao.
 
 ### Testes Eliminatorios
@@ -302,6 +305,7 @@ Resposta esperada:
 ### Persistencia
 
 - Criar infraestrutura de migracoes.
+- Configurar jOOQ como padrao de acesso a dados, com geracao de schema baseada nas migracoes.
 - Criar extensoes necessarias para UUID, se aplicavel.
 - Definir padrao de colunas `id`, `created_at` e `updated_at`.
 
@@ -1339,6 +1343,7 @@ openspec/changes/add-operational-readiness/
 - Docker Compose completo para dependencias locais.
 - Workflow de CI com build e testes.
 - Revisao final dos contratos de API conforme README do desafio.
+- Documentacao do uso de jOOQ para persistencia, queries tipadas e transacoes.
 
 ### Diferenciais recomendados
 
@@ -1362,6 +1367,7 @@ openspec/changes/add-operational-readiness/
 - Decisao de timezone.
 - Decisao de precisao monetaria.
 - Justificativa para PostgreSQL.
+- Justificativa para jOOQ como camada de queries tipadas e alternativa a JDBC manual.
 - Trade-offs e pontos de atencao.
 - Como validar manualmente os principais fluxos.
 
@@ -1498,6 +1504,7 @@ A entrega final deve demonstrar:
 - [ ] Migracoes criam tabelas, constraints e indices.
 - [ ] README explica como rodar aplicacao, banco e testes.
 - [ ] README explica decisoes de arquitetura.
+- [ ] README explica o uso de jOOQ na camada de persistencia e queries.
 - [ ] README explica idempotencia, concorrencia, timezone e precisao monetaria.
 - [ ] Docker Compose sobe dependencias.
 - [ ] CI executa build e testes.
