@@ -1,0 +1,27 @@
+rootProject.name = 'payment-api'
+
+include 'application'
+include 'adapters'
+include 'boundary-context'
+include 'core'
+
+file('core').eachDir { File dir ->
+    if (new File(dir, 'build.gradle').exists() || new File(dir, 'build.gradle.kts').exists()) {
+        include dir.name
+        project(":${dir.name}").projectDir = dir
+    }
+}
+
+file('adapters').eachDir { File dir ->
+    if (new File(dir, 'build.gradle').exists() || new File(dir, 'build.gradle.kts').exists()) {
+        include dir.name
+        project(":${dir.name}").projectDir = dir
+    }
+}
+
+file('boundary-context').eachDir { File dir ->
+    if (new File(dir, 'build.gradle').exists() || new File(dir, 'build.gradle.kts').exists()) {
+        include dir.name
+        project(":${dir.name}").projectDir = dir
+    }
+}

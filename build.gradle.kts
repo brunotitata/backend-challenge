@@ -1,26 +1,38 @@
 plugins {
-    kotlin("jvm") version "1.9.20"
-    id("io.ktor.plugin") version "2.3.7"
-    application
+    kotlin("jvm") version "1.9.22" apply false
+    kotlin("plugin.serialization") version "1.9.22" apply false
 }
 
 group = "com.trace"
 version = "0.0.1"
 
-application {
-    mainClass.set("com.trace.payment.ApplicationKt")
+allprojects {
+    group = rootProject.group
+    version = rootProject.version
+
+    repositories {
+        mavenCentral()
+    }
 }
 
-repositories {
-    mavenCentral()
+subprojects {
+    plugins.withId("org.jetbrains.kotlin.jvm") {
+        dependencies {
+            "testImplementation"("org.jetbrains.kotlin:kotlin-test:1.9.22")
+        }
+
+        tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
+            kotlinOptions.jvmTarget = "21"
+        }
+
+        tasks.withType<Test> {
+            useJUnitPlatform()
+        }
+    }
 }
 
-dependencies {
-    implementation("io.ktor:ktor-server-core:2.3.7")
-    implementation("io.ktor:ktor-server-netty:2.3.7")
-    implementation("io.ktor:ktor-server-content-negotiation:2.3.7")
-    implementation("io.ktor:ktor-serialization-jackson:2.3.7")
-    
-    testImplementation("io.ktor:ktor-server-tests:2.3.7")
-    testImplementation("org.jetbrains.kotlin:kotlin-test:1.9.20")
+tasks.register("run") {
+    group = "application"
+    description = "Runs the application module."
+    dependsOn(":application:run")
 }

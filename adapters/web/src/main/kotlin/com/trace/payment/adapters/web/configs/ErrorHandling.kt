@@ -1,0 +1,50 @@
+package com.trace.payment.adapters.web.configs
+
+import com.trace.payment.adapters.web.dtos.ErrorDTO
+import com.trace.payment.adapters.web.dtos.ErrorResponseDTO
+import com.trace.payment.boundary.exceptions.ValidationException
+import io.ktor.http.*
+import io.ktor.server.application.*
+import io.ktor.server.plugins.*
+import io.ktor.server.plugins.statuspages.*
+import io.ktor.server.response.*
+
+fun Application.configureErrorHandling() {
+    install(StatusPages) {
+        exception<ValidationException> { call, cause ->
+            call.respond(
+                HttpStatusCode.BadRequest,
+                ErrorResponseDTO(error = ErrorDTO(code = "VALIDATION_ERROR", message = cause.message ?: "Validation error")),
+            )
+        }
+
+        exception<BadRequestException> { call, cause ->
+            call.respond(
+                HttpStatusCode.BadRequest,
+                ErrorResponseDTO(error = ErrorDTO(code = "BAD_REQUEST", message = cause.message ?: "Invalid request body")),
+            )
+        }
+
+        status(HttpStatusCode.NotFound) { call, _ ->
+            call.respond(
+                HttpStatusCode.NotFound,
+                ErrorResponseDTO(error = ErrorDTO(code = "NOT_FOUND", message = "Route not found")),
+            )
+        }
+
+        status(HttpStatusCode.UnsupportedMediaType) { call, _ ->
+            call.respond(
+                HttpStatusCode.BadRequest,
+                ErrorResponseDTO(error = ErrorDTO(code = "BAD_REQUEST", message = "Invalid request body")),
+            )
+        }
+
+        exception<Throwable> { call, cause ->
+            call.application.log.error("Unhandled exception", cause)
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                ErrorResponseDTO(error = ErrorDTO(code = "INTERNAL_SERVER_ERROR", message = "Unexpected internal error")),
+            )
+        }
+    }
+}
