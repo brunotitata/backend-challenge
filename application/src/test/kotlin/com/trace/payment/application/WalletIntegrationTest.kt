@@ -3,6 +3,7 @@ package com.trace.payment.application
 import com.trace.payment.adapters.database.config.DatabaseFactory
 import com.trace.payment.adapters.database.config.JooqFactory
 import com.trace.payment.adapters.database.dao.WalletDAOSpecImpl
+import com.trace.payment.adapters.database.gateway.JooqTransactionManager
 import com.trace.payment.adapters.database.gateway.OutboxGatewayImpl
 import com.trace.payment.adapters.web.configs.configureErrorHandling
 import com.trace.payment.adapters.web.configs.configureSerialization
@@ -68,8 +69,8 @@ class WalletIntegrationTest {
         assertEquals(HttpStatusCode.Created, response.status)
         val body = response.bodyAsText()
         assertTrue(body.contains(""""ownerName":"Maria Silva""""))
-        assertTrue(body.contains(""""id":"""))
-        assertTrue(body.contains(""""createdAt":"""))
+        assertTrue(body.contains(""""id":""""))
+        assertTrue(body.contains(""""createdAt":""""))
         val createdAt = body.jsonString("createdAt")
         Instant.parse(createdAt)
     }
@@ -215,9 +216,10 @@ class WalletIntegrationTest {
     }
 
     private fun Application.configureTestWalletApplication() {
+        val transactionManager = JooqTransactionManager(dsl)
         val outboxGateway = OutboxGatewayImpl(dsl)
-        val walletDAO = WalletDAOSpecImpl(dsl, outboxGateway)
-        val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO)
+        val walletDAO = WalletDAOSpecImpl(dsl)
+        val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO, outboxGateway, transactionManager)
 
         configureSerialization()
         configureErrorHandling()

@@ -1,5 +1,6 @@
 package com.trace.payment.core.usecase
 
+import com.trace.payment.boundary.common.TransactionContext
 import com.trace.payment.boundary.database.WalletDAOSpec
 import com.trace.payment.boundary.exceptions.ValidationException
 import com.trace.payment.core.entities.WalletEntity
@@ -14,7 +15,7 @@ class CreateWalletUseCaseSpecImplTest {
     private val savedWallets = mutableListOf<WalletEntity>()
 
     private val walletDAO = object : WalletDAOSpec {
-        override fun save(wallet: WalletEntity): WalletEntity {
+        override fun save(wallet: WalletEntity, tx: TransactionContext): WalletEntity {
             savedWallets.add(wallet)
             return wallet
         }
@@ -23,7 +24,7 @@ class CreateWalletUseCaseSpecImplTest {
         override fun existsById(walletId: UUID): Boolean = false
     }
 
-    private val useCase = CreateWalletUseCaseSpecImpl(walletDAO)
+    private val useCase = CreateWalletUseCaseSpecImpl(walletDAO, FakeOutboxGateway, FakeTransactionManager)
 
     @Test
     fun `creates wallet with trimmed ownerName`() {

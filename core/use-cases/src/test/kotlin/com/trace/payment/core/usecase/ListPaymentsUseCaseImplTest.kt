@@ -1,5 +1,6 @@
 package com.trace.payment.core.usecase
 
+import com.trace.payment.boundary.common.TransactionContext
 import com.trace.payment.boundary.database.PaymentGatewaySpec
 import com.trace.payment.boundary.database.WalletDAOSpec
 import com.trace.payment.boundary.exceptions.NotFoundException
@@ -13,6 +14,7 @@ import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import com.trace.payment.core.entities.WalletEntity
 
 class ListPaymentsUseCaseImplTest {
 
@@ -42,13 +44,13 @@ class ListPaymentsUseCaseImplTest {
         ),
     ): ListPaymentsUseCaseImpl {
         val walletDAO = object : WalletDAOSpec {
-            override fun save(wallet: com.trace.payment.core.entities.WalletEntity) = wallet
+            override fun save(wallet: WalletEntity, tx: TransactionContext) = wallet
             override fun findActivePolicyName(walletId: UUID): String? = null
             override fun existsById(walletId: UUID): Boolean = walletExists
         }
 
         val gateway = object : PaymentGatewaySpec {
-            override fun processPaymentInTransaction(
+            override fun processPayment(
                 walletId: UUID,
                 policyId: UUID,
                 amount: BigDecimal,
@@ -59,6 +61,7 @@ class ListPaymentsUseCaseImplTest {
                 requestHash: String,
                 requestId: String?,
                 checkLimit: (consumedAmount: BigDecimal, transactionCount: Int) -> Boolean,
+                tx: TransactionContext,
             ) = throw UnsupportedOperationException()
 
             override fun findById(paymentId: UUID): PaymentEntity? = null
@@ -109,7 +112,7 @@ class ListPaymentsUseCaseImplTest {
         var passedLimit: Int = 0
 
         val gateway = object : PaymentGatewaySpec {
-            override fun processPaymentInTransaction(
+            override fun processPayment(
                 walletId: UUID,
                 policyId: UUID,
                 amount: BigDecimal,
@@ -120,6 +123,7 @@ class ListPaymentsUseCaseImplTest {
                 requestHash: String,
                 requestId: String?,
                 checkLimit: (consumedAmount: BigDecimal, transactionCount: Int) -> Boolean,
+                tx: TransactionContext,
             ) = throw UnsupportedOperationException()
 
             override fun findById(paymentId: UUID): PaymentEntity? = null
@@ -138,7 +142,7 @@ class ListPaymentsUseCaseImplTest {
         }
 
         val walletDAO = object : WalletDAOSpec {
-            override fun save(wallet: com.trace.payment.core.entities.WalletEntity) = wallet
+            override fun save(wallet: WalletEntity, tx: TransactionContext) = wallet
             override fun findActivePolicyName(walletId: UUID): String? = null
             override fun existsById(walletId: UUID): Boolean = true
         }

@@ -3,8 +3,6 @@ package com.trace.payment.adapters.database.dao
 import com.trace.payment.adapters.database.jooq.tables.Policies.POLICIES
 import com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES
 import com.trace.payment.adapters.database.jooq.tables.Wallets.WALLETS
-import com.trace.payment.boundary.common.OutboxEventBO
-import com.trace.payment.boundary.database.OutboxGatewaySpec
 import com.trace.payment.boundary.database.PolicyDAOSpec
 import com.trace.payment.core.entities.PolicyEntity
 import org.jooq.DSLContext
@@ -12,52 +10,31 @@ import org.jooq.Record
 import org.jooq.impl.DSL
 import java.time.ZoneOffset
 import java.util.UUID
+import com.trace.payment.adapters.database.gateway.JooqTransactionContext
+import com.trace.payment.boundary.common.TransactionContext
 
 class PolicyDAOSpecImpl(
     private val dsl: DSLContext,
-    private val outboxGateway: OutboxGatewaySpec,
 ) : PolicyDAOSpec {
 
-    override fun save(policy: PolicyEntity): PolicyEntity {
-        return dsl.transactionResult { configuration ->
-            val tx = DSL.using(configuration)
-            val record = tx
-                .insertInto(POLICIES)
-                .set(POLICIES.ID, policy.id)
-                .set(POLICIES.NAME, policy.name)
-                .set(POLICIES.CATEGORY, policy.category)
-                .set(POLICIES.MAX_PER_PAYMENT, policy.maxPerPayment)
-                .set(POLICIES.DAYTIME_DAILY_LIMIT, policy.daytimeDailyLimit)
-                .set(POLICIES.NIGHTTIME_DAILY_LIMIT, policy.nighttimeDailyLimit)
-                .set(POLICIES.WEEKEND_DAILY_LIMIT, policy.weekendDailyLimit)
-                .set(POLICIES.DAILY_TRANSACTION_LIMIT, policy.dailyTransactionLimit)
-                .set(POLICIES.CREATED_AT, policy.createdAt.atOffset(ZoneOffset.UTC))
-                .set(POLICIES.UPDATED_AT, policy.updatedAt.atOffset(ZoneOffset.UTC))
-                .returning()
-                .fetchOne() ?: error("Policy insert did not return a row")
+    override fun save(policy: PolicyEntity, tx: TransactionContext): PolicyEntity {
+        val jooqTx = tx as JooqTransactionContext
+        val record = jooqTx.dsl
+            .insertInto(POLICIES)
+            .set(POLICIES.ID, policy.id)
+            .set(POLICIES.NAME, policy.name)
+            .set(POLICIES.CATEGORY, policy.category)
+            .set(POLICIES.MAX_PER_PAYMENT, policy.maxPerPayment)
+            .set(POLICIES.DAYTIME_DAILY_LIMIT, policy.daytimeDailyLimit)
+            .set(POLICIES.NIGHTTIME_DAILY_LIMIT, policy.nighttimeDailyLimit)
+            .set(POLICIES.WEEKEND_DAILY_LIMIT, policy.weekendDailyLimit)
+            .set(POLICIES.DAILY_TRANSACTION_LIMIT, policy.dailyTransactionLimit)
+            .set(POLICIES.CREATED_AT, policy.createdAt.atOffset(ZoneOffset.UTC))
+            .set(POLICIES.UPDATED_AT, policy.updatedAt.atOffset(ZoneOffset.UTC))
+            .returning()
+            .fetchOne() ?: error("Policy insert did not return a row")
 
-            val payload = buildString {
-                append("{")
-                append("\"id\":\"${policy.id}\",")
-                append("\"name\":\"${policy.name}\",")
-                append("\"category\":\"${policy.category}\"")
-                policy.maxPerPayment?.let { append(",\"maxPerPayment\":\"$it\"") }
-                policy.daytimeDailyLimit?.let { append(",\"daytimeDailyLimit\":\"$it\"") }
-                policy.nighttimeDailyLimit?.let { append(",\"nighttimeDailyLimit\":\"$it\"") }
-                policy.weekendDailyLimit?.let { append(",\"weekendDailyLimit\":\"$it\"") }
-                policy.dailyTransactionLimit?.let { append(",\"dailyTransactionLimit\":$it") }
-                append("}")
-            }
-            val event = OutboxEventBO(
-                aggregateType = "policy",
-                aggregateId = policy.id.toString(),
-                eventType = "POLICY_CREATED",
-                payload = payload,
-            )
-            outboxGateway.save(event, com.trace.payment.adapters.database.gateway.JooqTransactionContext(tx))
-
-            mapToPolicyEntity(record)
-        }
+        return mapToPolicyEntity(record)
     }
 
     override fun findAll(): List<PolicyEntity> {
@@ -94,36 +71,26 @@ class PolicyDAOSpecImpl(
             .fetchOne { mapToPolicyEntity(it) }
     }
 
-    override fun assignPolicy(walletId: UUID, policyId: UUID) {
-        dsl.transaction { configuration ->
-            val tx = DSL.using(configuration)
+    override fun assignPolicy(walletId: UUID, policyId: UUID, tx: TransactionContext) {
+        val jooqTx = tx as JooqTransactionContext
 
-            tx.selectOne()
-                .from(WALLETS)
-                .where(WALLETS.ID.eq(walletId))
-                .forUpdate()
-                .fetchOne()
+        jooqTx.dsl.selectOne()
+            .from(WALLETS)
+            .where(WALLETS.ID.eq(walletId))
+            .forUpdate()
+            .fetchOne()
 
-            tx.update(WALLET_POLICIES)
-                .set(WALLET_POLICIES.ACTIVE, false)
-                .where(WALLET_POLICIES.WALLET_ID.eq(walletId))
-                .and(WALLET_POLICIES.ACTIVE.eq(true))
-                .execute()
+        jooqTx.dsl.update(WALLET_POLICIES)
+            .set(WALLET_POLICIES.ACTIVE, false)
+            .where(WALLET_POLICIES.WALLET_ID.eq(walletId))
+            .and(WALLET_POLICIES.ACTIVE.eq(true))
+            .execute()
 
-            tx.insertInto(WALLET_POLICIES)
-                .set(WALLET_POLICIES.WALLET_ID, walletId)
-                .set(WALLET_POLICIES.POLICY_ID, policyId)
-                .set(WALLET_POLICIES.ACTIVE, true)
-                .execute()
-
-            val event = OutboxEventBO(
-                aggregateType = "wallet_policy",
-                aggregateId = walletId.toString(),
-                eventType = "POLICY_ASSIGNED",
-                payload = "{\"walletId\":\"$walletId\",\"policyId\":\"$policyId\"}",
-            )
-            outboxGateway.save(event, com.trace.payment.adapters.database.gateway.JooqTransactionContext(tx))
-        }
+        jooqTx.dsl.insertInto(WALLET_POLICIES)
+            .set(WALLET_POLICIES.WALLET_ID, walletId)
+            .set(WALLET_POLICIES.POLICY_ID, policyId)
+            .set(WALLET_POLICIES.ACTIVE, true)
+            .execute()
     }
 
     private fun mapToPolicyEntity(record: Record, active: Boolean? = null): PolicyEntity {

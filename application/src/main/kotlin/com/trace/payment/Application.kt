@@ -5,6 +5,7 @@ import com.trace.payment.adapters.database.config.DatabaseFactory
 import com.trace.payment.adapters.database.config.JooqFactory
 import com.trace.payment.adapters.database.dao.PolicyDAOSpecImpl
 import com.trace.payment.adapters.database.dao.WalletDAOSpecImpl
+import com.trace.payment.adapters.database.gateway.JooqTransactionManager
 import com.trace.payment.adapters.database.gateway.OutboxGatewayImpl
 import com.trace.payment.adapters.database.gateway.PaymentGatewayImpl
 import com.trace.payment.adapters.message.RabbitMqEventPublisher
@@ -41,10 +42,11 @@ fun main() {
         }
         val dsl = JooqFactory.create(dataSource)
 
+        val transactionManager = JooqTransactionManager(dsl)
         val outboxGateway = OutboxGatewayImpl(dsl)
-        val walletDAO = WalletDAOSpecImpl(dsl, outboxGateway)
-        val policyDAO = PolicyDAOSpecImpl(dsl, outboxGateway)
-        val paymentGateway = PaymentGatewayImpl(dsl, outboxGateway)
+        val walletDAO = WalletDAOSpecImpl(dsl)
+        val policyDAO = PolicyDAOSpecImpl(dsl)
+        val paymentGateway = PaymentGatewayImpl(dsl)
 
         val policyResolver = PolicyResolverImpl(policyDAO)
         val policyRegistry = PolicyEvaluatorRegistryImpl().apply {
@@ -52,12 +54,12 @@ fun main() {
             register("TX_COUNT_LIMIT", TxCountLimitEvaluator())
         }
 
-        val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO)
-        val createPolicyUseCase = CreatePolicyUseCaseImpl(policyDAO)
+        val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO, outboxGateway, transactionManager)
+        val createPolicyUseCase = CreatePolicyUseCaseImpl(policyDAO, outboxGateway, transactionManager)
         val listPoliciesUseCase = ListPoliciesUseCaseImpl(policyDAO)
         val listWalletPoliciesUseCase = ListWalletPoliciesUseCaseImpl(policyDAO, walletDAO)
-        val assignPolicyUseCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO)
-        val processPaymentUseCase = ProcessPaymentUseCaseImpl(walletDAO, policyResolver, policyRegistry, paymentGateway)
+        val assignPolicyUseCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO, outboxGateway, transactionManager)
+        val processPaymentUseCase = ProcessPaymentUseCaseImpl(walletDAO, policyResolver, policyRegistry, paymentGateway, outboxGateway, transactionManager)
         val listPaymentsUseCase = ListPaymentsUseCaseImpl(walletDAO, paymentGateway)
 
         val rabbitHost = System.getenv("RABBITMQ_HOST") ?: "localhost"

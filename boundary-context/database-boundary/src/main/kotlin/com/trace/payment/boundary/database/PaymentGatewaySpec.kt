@@ -1,5 +1,6 @@
 package com.trace.payment.boundary.database
 
+import com.trace.payment.boundary.common.TransactionContext
 import com.trace.payment.core.entities.PaginationResult
 import com.trace.payment.core.entities.PaymentEntity
 import com.trace.payment.core.entities.PeriodType
@@ -8,7 +9,7 @@ import java.time.Instant
 import java.util.UUID
 
 interface PaymentGatewaySpec {
-    fun processPaymentInTransaction(
+    fun processPayment(
         walletId: UUID,
         policyId: UUID,
         amount: BigDecimal,
@@ -19,6 +20,7 @@ interface PaymentGatewaySpec {
         requestHash: String,
         requestId: String?,
         checkLimit: (consumedAmount: BigDecimal, transactionCount: Int) -> Boolean,
+        tx: TransactionContext,
     ): TransactionResult
 
     fun findById(paymentId: UUID): PaymentEntity?

@@ -18,6 +18,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.jooq.impl.DSL
 
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -81,7 +82,7 @@ class OutboxGatewayImplTest {
         )
 
         dsl.transactionResult { configuration ->
-            val tx = org.jooq.impl.DSL.using(configuration)
+            val tx = DSL.using(configuration)
             outboxGateway.save(event, JooqTransactionContext(tx))
             "done"
         }

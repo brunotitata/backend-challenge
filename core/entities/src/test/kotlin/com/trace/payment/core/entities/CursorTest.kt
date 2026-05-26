@@ -5,6 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import java.time.Instant
 import java.util.UUID
+import java.util.Base64
 
 class CursorTest {
 
@@ -56,7 +57,7 @@ class CursorTest {
 
     @Test
     fun `decode of valid base64 but wrong format throws exception`() {
-        val encoded = java.util.Base64.getUrlEncoder().encodeToString("invalid-format".toByteArray())
+        val encoded = Base64.getUrlEncoder().encodeToString("invalid-format".toByteArray())
         assertFailsWith<IllegalArgumentException> {
             Cursor.decode(encoded)
         }

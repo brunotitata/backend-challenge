@@ -1,5 +1,6 @@
 package com.trace.payment.core.usecase
 
+import com.trace.payment.boundary.common.TransactionContext
 import com.trace.payment.boundary.database.PolicyDAOSpec
 import com.trace.payment.core.entities.PolicyEntity
 import java.math.BigDecimal
@@ -30,12 +31,12 @@ class PolicyResolverImplTest {
 
     private fun createResolver(policy: PolicyEntity?): PolicyResolverImpl {
         val policyDAO = object : PolicyDAOSpec {
-            override fun save(policy: PolicyEntity): PolicyEntity = policy
+            override fun save(policy: PolicyEntity, tx: TransactionContext): PolicyEntity = policy
             override fun findAll(): List<PolicyEntity> = emptyList()
             override fun findByWalletId(walletId: UUID): List<PolicyEntity> = emptyList()
             override fun findById(policyId: UUID): PolicyEntity? = null
             override fun findActiveByWalletId(walletId: UUID): PolicyEntity? = policy
-            override fun assignPolicy(walletId: UUID, policyId: UUID) {}
+            override fun assignPolicy(walletId: UUID, policyId: UUID, tx: TransactionContext) {}
         }
         return PolicyResolverImpl(policyDAO)
     }

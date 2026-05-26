@@ -4,6 +4,7 @@ import com.trace.payment.adapters.database.config.DatabaseFactory
 import com.trace.payment.adapters.database.config.JooqFactory
 import com.trace.payment.adapters.database.dao.PolicyDAOSpecImpl
 import com.trace.payment.adapters.database.dao.WalletDAOSpecImpl
+import com.trace.payment.adapters.database.gateway.JooqTransactionManager
 import com.trace.payment.adapters.database.gateway.OutboxGatewayImpl
 import com.trace.payment.adapters.database.gateway.PaymentGatewayImpl
 import com.trace.payment.adapters.web.configs.configureErrorHandling
@@ -53,6 +54,13 @@ import org.junit.jupiter.api.BeforeAll
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import com.trace.payment.adapters.database.jooq.tables.WalletPolicies
+import java.net.URI
+import java.time.OffsetDateTime
+import java.math.BigDecimal
+import java.net.ServerSocket
+import org.junit.jupiter.api.Assertions
+import io.ktor.client.HttpClient as KtorHttpClient
 
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -581,7 +589,7 @@ class PaymentIntegrationTest {
 
         fun postPayment(key: String, amount: String, time: String): HttpResponse<String> = httpClient.send(
             HttpRequest.newBuilder()
-                .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                .uri(URI.create("http://localhost:$port/wallets/$walletId/payments"))
                 .header("Content-Type", "application/json")
                 .header("Idempotency-Key", key)
                 .method("POST", HttpRequest.BodyPublishers.ofString("""{"amount":$amount,"occurredAt":"2024-08-26T$time"}"""))
@@ -599,7 +607,7 @@ class PaymentIntegrationTest {
             executor.submit<HttpResponse<String>> {
                 httpClient.send(
                     HttpRequest.newBuilder()
-                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                        .uri(URI.create("http://localhost:$port/wallets/$walletId/payments"))
                         .header("Content-Type", "application/json")
                         .header("Idempotency-Key", "concurrent-700-a")
                         .method("POST", HttpRequest.BodyPublishers.ofString("""{"amount":700.00,"occurredAt":"2024-08-26T13:00:00.0000Z"}"""))
@@ -610,7 +618,7 @@ class PaymentIntegrationTest {
             executor.submit<HttpResponse<String>> {
                 httpClient.send(
                     HttpRequest.newBuilder()
-                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                        .uri(URI.create("http://localhost:$port/wallets/$walletId/payments"))
                         .header("Content-Type", "application/json")
                         .header("Idempotency-Key", "concurrent-700-b")
                         .method("POST", HttpRequest.BodyPublishers.ofString("""{"amount":700.00,"occurredAt":"2024-08-26T13:00:00.0000Z"}"""))
@@ -638,7 +646,7 @@ class PaymentIntegrationTest {
 
         val policyId = httpClient.send(
             HttpRequest.newBuilder()
-                .uri(java.net.URI.create("http://localhost:$port/policies"))
+                .uri(URI.create("http://localhost:$port/policies"))
                 .header("Content-Type", "application/json")
                 .method("POST", HttpRequest.BodyPublishers.ofString(
                     """{"name":"CONCURRENT_TEST","category":"VALUE_LIMIT","maxPerPayment":"5000.00","daytimeDailyLimit":"4000.00","nighttimeDailyLimit":"1000.00","weekendDailyLimit":"1000.00"}"""
@@ -654,7 +662,7 @@ class PaymentIntegrationTest {
 
         httpClient.send(
             HttpRequest.newBuilder()
-                .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/policy"))
+                .uri(URI.create("http://localhost:$port/wallets/$walletId/policy"))
                 .header("Content-Type", "application/json")
                 .method("PUT", HttpRequest.BodyPublishers.ofString("""{"policyId":"$policyId"}"""))
                 .build(),
@@ -663,7 +671,7 @@ class PaymentIntegrationTest {
 
         fun postPayment(key: String, amount: String): HttpResponse<String> = httpClient.send(
             HttpRequest.newBuilder()
-                .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                .uri(URI.create("http://localhost:$port/wallets/$walletId/payments"))
                 .header("Content-Type", "application/json")
                 .header("Idempotency-Key", key)
                 .method("POST", HttpRequest.BodyPublishers.ofString("""{"amount":$amount,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
@@ -697,8 +705,8 @@ class PaymentIntegrationTest {
         val futures = listOf(
             executor.submit<java.net.http.HttpResponse<String>> {
                 httpClient.send(
-                    java.net.http.HttpRequest.newBuilder()
-                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                    HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:$port/wallets/$walletId/payments"))
                         .header("Content-Type", "application/json")
                         .header("Idempotency-Key", "concurrent-idem-key")
                         .method("POST",                     HttpRequest.BodyPublishers.ofString("""{"amount":500.00,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
@@ -708,8 +716,8 @@ class PaymentIntegrationTest {
             },
             executor.submit<java.net.http.HttpResponse<String>> {
                 httpClient.send(
-                    java.net.http.HttpRequest.newBuilder()
-                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                    HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:$port/wallets/$walletId/payments"))
                         .header("Content-Type", "application/json")
                         .header("Idempotency-Key", "concurrent-idem-key")
                         .method("POST",                     HttpRequest.BodyPublishers.ofString("""{"amount":500.00,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
@@ -740,8 +748,8 @@ class PaymentIntegrationTest {
         val futures = listOf(
             executor.submit<java.net.http.HttpResponse<String>> {
                 httpClient.send(
-                    java.net.http.HttpRequest.newBuilder()
-                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                    HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:$port/wallets/$walletId/payments"))
                         .header("Content-Type", "application/json")
                         .header("Idempotency-Key", "concurrent-conflict-key")
                         .method("POST",                     HttpRequest.BodyPublishers.ofString("""{"amount":500.00,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
@@ -751,8 +759,8 @@ class PaymentIntegrationTest {
             },
             executor.submit<java.net.http.HttpResponse<String>> {
                 httpClient.send(
-                    java.net.http.HttpRequest.newBuilder()
-                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                    HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:$port/wallets/$walletId/payments"))
                         .header("Content-Type", "application/json")
                         .header("Idempotency-Key", "concurrent-conflict-key")
                         .method("POST",                     HttpRequest.BodyPublishers.ofString("""{"amount":600.00,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
@@ -784,8 +792,8 @@ class PaymentIntegrationTest {
         val futures = listOf(
             executor.submit<java.net.http.HttpResponse<String>> {
                 httpClient.send(
-                    java.net.http.HttpRequest.newBuilder()
-                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletA/payments"))
+                    HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:$port/wallets/$walletA/payments"))
                         .header("Content-Type", "application/json")
                         .header("Idempotency-Key", "wallet-a-concurrent")
                         .method("POST",                     HttpRequest.BodyPublishers.ofString("""{"amount":1000.00,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
@@ -795,8 +803,8 @@ class PaymentIntegrationTest {
             },
             executor.submit<java.net.http.HttpResponse<String>> {
                 httpClient.send(
-                    java.net.http.HttpRequest.newBuilder()
-                        .uri(java.net.URI.create("http://localhost:$port/wallets/$walletB/payments"))
+                    HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:$port/wallets/$walletB/payments"))
                         .header("Content-Type", "application/json")
                         .header("Idempotency-Key", "wallet-b-concurrent")
                         .method("POST",                     HttpRequest.BodyPublishers.ofString("""{"amount":1000.00,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
@@ -841,18 +849,18 @@ class PaymentIntegrationTest {
                 PAYMENT_IDEMPOTENCY_KEYS.CREATED_AT,
                 PAYMENT_IDEMPOTENCY_KEYS.UPDATED_AT,
             ).values(
-                java.util.UUID.randomUUID(),
-                java.util.UUID.fromString(walletId),
+                UUID.randomUUID(),
+                UUID.fromString(walletId),
                 "constraint-test-key",
                 "hash",
                 null,
                 201,
-                java.time.OffsetDateTime.now(),
-                java.time.OffsetDateTime.now(),
+                OffsetDateTime.now(),
+                OffsetDateTime.now(),
             ).execute()
         }
 
-        org.junit.jupiter.api.Assertions.assertTrue(
+        Assertions.assertTrue(
             exception.message?.contains("unique") == true ||
             exception.message?.contains("duplicate") == true ||
             exception.message?.contains("Unique index") == true ||
@@ -1074,11 +1082,11 @@ class PaymentIntegrationTest {
         postPayment(client, walletId, 100.0, "2024-08-26T10:00:00.0000Z", "only-approved-1")
 
         val policyId = dsl.select(
-            com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES.POLICY_ID,
-        ).from(com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES)
-            .where(com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES.WALLET_ID.eq(java.util.UUID.fromString(walletId)))
-            .and(com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES.ACTIVE.eq(true))
-            .fetchOne { it.get(com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES.POLICY_ID) }
+            WalletPolicies.WALLET_POLICIES.POLICY_ID,
+        ).from(WalletPolicies.WALLET_POLICIES)
+            .where(WalletPolicies.WALLET_POLICIES.WALLET_ID.eq(UUID.fromString(walletId)))
+            .and(WalletPolicies.WALLET_POLICIES.ACTIVE.eq(true))
+            .fetchOne { it.get(WalletPolicies.WALLET_POLICIES.POLICY_ID) }
             ?: throw AssertionError("No active policy found for wallet")
 
         dsl.insertInto(
@@ -1087,12 +1095,12 @@ class PaymentIntegrationTest {
             PAYMENTS.OCCURRED_AT, PAYMENTS.PERIOD_TYPE, PAYMENTS.PERIOD_START,
             PAYMENTS.STATUS, PAYMENTS.CREATED_AT, PAYMENTS.UPDATED_AT,
         ).values(
-            UUID.randomUUID(), java.util.UUID.fromString(walletId),
+            UUID.randomUUID(), UUID.fromString(walletId),
             policyId,
-            java.math.BigDecimal("50.00"),
-            java.time.OffsetDateTime.parse("2024-08-26T11:00:00.0000Z"),
-            "DAYTIME", java.time.OffsetDateTime.parse("2024-08-26T06:00:00.0000Z"),
-            "REJECTED", java.time.OffsetDateTime.now(), java.time.OffsetDateTime.now(),
+            BigDecimal("50.00"),
+            OffsetDateTime.parse("2024-08-26T11:00:00.0000Z"),
+            "DAYTIME", OffsetDateTime.parse("2024-08-26T06:00:00.0000Z"),
+            "REJECTED", OffsetDateTime.now(), OffsetDateTime.now(),
         ).execute()
 
         val response = client.get("/wallets/$walletId/payments")
@@ -1259,7 +1267,7 @@ class PaymentIntegrationTest {
 
         val policyId = httpClient.send(
             HttpRequest.newBuilder()
-                .uri(java.net.URI.create("http://localhost:$port/policies"))
+                .uri(URI.create("http://localhost:$port/policies"))
                 .header("Content-Type", "application/json")
                 .method("POST", HttpRequest.BodyPublishers.ofString(
                     """{"name":"DAILY_TX_LIMIT","category":"TX_COUNT_LIMIT","dailyTransactionLimit":2}""",
@@ -1275,7 +1283,7 @@ class PaymentIntegrationTest {
 
         httpClient.send(
             HttpRequest.newBuilder()
-                .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/policy"))
+                .uri(URI.create("http://localhost:$port/wallets/$walletId/policy"))
                 .header("Content-Type", "application/json")
                 .method("PUT", HttpRequest.BodyPublishers.ofString("""{"policyId":"$policyId"}"""))
                 .build(),
@@ -1284,7 +1292,7 @@ class PaymentIntegrationTest {
 
         fun postPayment(key: String): HttpResponse<String> = httpClient.send(
             HttpRequest.newBuilder()
-                .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                .uri(URI.create("http://localhost:$port/wallets/$walletId/payments"))
                 .header("Content-Type", "application/json")
                 .header("Idempotency-Key", key)
                 .method("POST", HttpRequest.BodyPublishers.ofString("""{"amount":10.0,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
@@ -1315,16 +1323,18 @@ class PaymentIntegrationTest {
 
     private fun createWallet(ownerName: String): String {
         val outboxGateway = OutboxGatewayImpl(dsl)
-        val walletDAO = WalletDAOSpecImpl(dsl, outboxGateway)
-        val useCase = CreateWalletUseCaseSpecImpl(walletDAO)
+        val transactionManager = JooqTransactionManager(dsl)
+        val walletDAO = WalletDAOSpecImpl(dsl)
+        val useCase = CreateWalletUseCaseSpecImpl(walletDAO, outboxGateway, transactionManager)
         val wallet = useCase.execute(ownerName)
         return wallet.id.toString()
     }
 
     private fun createTxCountPolicy(name: String, limit: Int): String {
         val outboxGateway = OutboxGatewayImpl(dsl)
-        val policyDAO = PolicyDAOSpecImpl(dsl, outboxGateway)
-        val useCase = CreatePolicyUseCaseImpl(policyDAO)
+        val transactionManager = JooqTransactionManager(dsl)
+        val policyDAO = PolicyDAOSpecImpl(dsl)
+        val useCase = CreatePolicyUseCaseImpl(policyDAO, outboxGateway, transactionManager)
         val policy = useCase.execute(
             name = name,
             category = "TX_COUNT_LIMIT",
@@ -1339,9 +1349,10 @@ class PaymentIntegrationTest {
 
     private fun assignPolicy(walletId: String, policyId: String) {
         val outboxGateway = OutboxGatewayImpl(dsl)
-        val policyDAO = PolicyDAOSpecImpl(dsl, outboxGateway)
-        val walletDAO = WalletDAOSpecImpl(dsl, outboxGateway)
-        val useCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO)
+        val transactionManager = JooqTransactionManager(dsl)
+        val policyDAO = PolicyDAOSpecImpl(dsl)
+        val walletDAO = WalletDAOSpecImpl(dsl)
+        val useCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO, outboxGateway, transactionManager)
         useCase.execute(UUID.fromString(walletId), UUID.fromString(policyId))
     }
 
@@ -1368,7 +1379,7 @@ class PaymentIntegrationTest {
             )
             serverDataSource = dataSource
             val dsl = JooqFactory.create(dataSource)
-            port = java.net.ServerSocket(0).use { it.localPort }
+            port = ServerSocket(0).use { it.localPort }
             server = embeddedServer(Netty, port = port) {
                 configureApplication(dsl)
             }.start(wait = false)
@@ -1385,9 +1396,10 @@ class PaymentIntegrationTest {
 
 private fun Application.configureApplication(dsl: DSLContext) {
     val outboxGateway = OutboxGatewayImpl(dsl)
-    val walletDAO = WalletDAOSpecImpl(dsl, outboxGateway)
-    val policyDAO = PolicyDAOSpecImpl(dsl, outboxGateway)
-    val paymentGateway = PaymentGatewayImpl(dsl, outboxGateway)
+    val transactionManager = JooqTransactionManager(dsl)
+    val walletDAO = WalletDAOSpecImpl(dsl)
+    val policyDAO = PolicyDAOSpecImpl(dsl)
+    val paymentGateway = PaymentGatewayImpl(dsl)
 
     val policyResolver = PolicyResolverImpl(policyDAO)
     val policyRegistry = PolicyEvaluatorRegistryImpl().apply {
@@ -1395,12 +1407,12 @@ private fun Application.configureApplication(dsl: DSLContext) {
         register("TX_COUNT_LIMIT", TxCountLimitEvaluator())
     }
 
-    val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO)
-    val createPolicyUseCase = CreatePolicyUseCaseImpl(policyDAO)
+    val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO, outboxGateway, transactionManager)
+    val createPolicyUseCase = CreatePolicyUseCaseImpl(policyDAO, outboxGateway, transactionManager)
     val listPoliciesUseCase = ListPoliciesUseCaseImpl(policyDAO)
     val listWalletPoliciesUseCase = ListWalletPoliciesUseCaseImpl(policyDAO, walletDAO)
-    val assignPolicyUseCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO)
-    val processPaymentUseCase = ProcessPaymentUseCaseImpl(walletDAO, policyResolver, policyRegistry, paymentGateway)
+    val assignPolicyUseCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO, outboxGateway, transactionManager)
+    val processPaymentUseCase = ProcessPaymentUseCaseImpl(walletDAO, policyResolver, policyRegistry, paymentGateway, outboxGateway, transactionManager)
     val listPaymentsUseCase = ListPaymentsUseCaseImpl(walletDAO, paymentGateway)
 
     configureSerialization()
@@ -1416,7 +1428,7 @@ private fun Application.configureApplication(dsl: DSLContext) {
 }
 
 private suspend fun postPayment(
-    client: io.ktor.client.HttpClient,
+    client: KtorHttpClient,
     walletId: String,
     amount: Double,
     occurredAt: String,

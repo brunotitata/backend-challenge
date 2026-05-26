@@ -5,8 +5,7 @@ import com.trace.payment.adapters.database.jooq.tables.PaymentAuditEvents.PAYMEN
 import com.trace.payment.adapters.database.jooq.tables.PaymentIdempotencyKeys.PAYMENT_IDEMPOTENCY_KEYS
 import com.trace.payment.adapters.database.jooq.tables.Payments.PAYMENTS
 import com.trace.payment.adapters.database.jooq.tables.Wallets.WALLETS
-import com.trace.payment.boundary.common.OutboxEventBO
-import com.trace.payment.boundary.database.OutboxGatewaySpec
+import com.trace.payment.boundary.common.TransactionContext
 import com.trace.payment.boundary.database.PaymentGatewaySpec
 import com.trace.payment.boundary.database.TransactionResult
 import com.trace.payment.core.entities.Cursor
@@ -25,12 +24,29 @@ import java.util.UUID
 
 class PaymentGatewayImpl(
     private val dsl: DSLContext,
-    private val outboxGateway: OutboxGatewaySpec,
 ) : PaymentGatewaySpec {
 
     private val logger = LoggerFactory.getLogger(PaymentGatewayImpl::class.java)
 
-    override fun processPaymentInTransaction(
+    override fun processPayment(
+        walletId: UUID,
+        policyId: UUID,
+        amount: BigDecimal,
+        occurredAt: Instant,
+        periodType: PeriodType,
+        periodStart: Instant,
+        idempotencyKey: String,
+        requestHash: String,
+        requestId: String?,
+        checkLimit: (consumedAmount: BigDecimal, transactionCount: Int) -> Boolean,
+        tx: TransactionContext,
+    ): TransactionResult {
+        val jooqTx = tx as JooqTransactionContext
+        return processPaymentInternal(jooqTx.dsl, walletId, policyId, amount, occurredAt, periodType, periodStart, idempotencyKey, requestHash, requestId, checkLimit)
+    }
+
+    private fun processPaymentInternal(
+        tx: DSLContext,
         walletId: UUID,
         policyId: UUID,
         amount: BigDecimal,
@@ -42,168 +58,96 @@ class PaymentGatewayImpl(
         requestId: String?,
         checkLimit: (consumedAmount: BigDecimal, transactionCount: Int) -> Boolean,
     ): TransactionResult {
-        return dsl.transactionResult { configuration ->
-            val tx = DSL.using(configuration)
-            val now = OffsetDateTime.now()
+        val now = OffsetDateTime.now()
 
-            tx.selectOne()
-                .from(WALLETS)
-                .where(WALLETS.ID.eq(walletId))
-                .forUpdate()
-                .fetchOne()
+        tx.selectOne()
+            .from(WALLETS)
+            .where(WALLETS.ID.eq(walletId))
+            .forUpdate()
+            .fetchOne()
 
-            val idempotencyInserted = tx.insertInto(
-                PAYMENT_IDEMPOTENCY_KEYS,
-                PAYMENT_IDEMPOTENCY_KEYS.ID,
+        val idempotencyInserted = tx.insertInto(
+            PAYMENT_IDEMPOTENCY_KEYS,
+            PAYMENT_IDEMPOTENCY_KEYS.ID,
+            PAYMENT_IDEMPOTENCY_KEYS.WALLET_ID,
+            PAYMENT_IDEMPOTENCY_KEYS.IDEMPOTENCY_KEY,
+            PAYMENT_IDEMPOTENCY_KEYS.REQUEST_HASH,
+            PAYMENT_IDEMPOTENCY_KEYS.PAYMENT_ID,
+            PAYMENT_IDEMPOTENCY_KEYS.RESPONSE_STATUS,
+            PAYMENT_IDEMPOTENCY_KEYS.RESPONSE_BODY,
+            PAYMENT_IDEMPOTENCY_KEYS.CREATED_AT,
+            PAYMENT_IDEMPOTENCY_KEYS.UPDATED_AT,
+        )
+            .values(
+                UUID.randomUUID(),
+                walletId,
+                idempotencyKey,
+                requestHash,
+                null,
+                0,
+                null,
+                now,
+                now,
+            )
+            .onConflict(
                 PAYMENT_IDEMPOTENCY_KEYS.WALLET_ID,
                 PAYMENT_IDEMPOTENCY_KEYS.IDEMPOTENCY_KEY,
-                PAYMENT_IDEMPOTENCY_KEYS.REQUEST_HASH,
-                PAYMENT_IDEMPOTENCY_KEYS.PAYMENT_ID,
-                PAYMENT_IDEMPOTENCY_KEYS.RESPONSE_STATUS,
-                PAYMENT_IDEMPOTENCY_KEYS.RESPONSE_BODY,
-                PAYMENT_IDEMPOTENCY_KEYS.CREATED_AT,
-                PAYMENT_IDEMPOTENCY_KEYS.UPDATED_AT,
             )
-                .values(
-                    UUID.randomUUID(),
-                    walletId,
-                    idempotencyKey,
-                    requestHash,
-                    null,
-                    0,
-                    null,
-                    now,
-                    now,
-                )
-                .onConflict(
-                    PAYMENT_IDEMPOTENCY_KEYS.WALLET_ID,
-                    PAYMENT_IDEMPOTENCY_KEYS.IDEMPOTENCY_KEY,
-                )
-                .doNothing()
-                .execute() == 1
+            .doNothing()
+            .execute() == 1
 
-            if (!idempotencyInserted) {
-                val existing = tx.selectFrom(PAYMENT_IDEMPOTENCY_KEYS)
-                    .where(PAYMENT_IDEMPOTENCY_KEYS.WALLET_ID.eq(walletId))
-                    .and(PAYMENT_IDEMPOTENCY_KEYS.IDEMPOTENCY_KEY.eq(idempotencyKey))
-                    .fetchOne()
-                    ?: error("Idempotency key not found after ON CONFLICT")
-
-                return@transactionResult if (existing.get(PAYMENT_IDEMPOTENCY_KEYS.REQUEST_HASH) == requestHash) {
-                    val paymentId = existing.get(PAYMENT_IDEMPOTENCY_KEYS.PAYMENT_ID)
-                    val status = existing.get(PAYMENT_IDEMPOTENCY_KEYS.RESPONSE_STATUS) ?: 422
-                    val payment = paymentId?.let { findByIdInternal(tx, it) }
-                    TransactionResult.IdempotentReplay(status, payment)
-                } else {
-                    TransactionResult.Conflict
-                }
-            }
-
-            tx.insertInto(
-                LIMIT_CONSUMPTIONS,
-                LIMIT_CONSUMPTIONS.WALLET_ID,
-                LIMIT_CONSUMPTIONS.POLICY_ID,
-                LIMIT_CONSUMPTIONS.PERIOD_TYPE,
-                LIMIT_CONSUMPTIONS.PERIOD_START,
-                LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT,
-                LIMIT_CONSUMPTIONS.TRANSACTION_COUNT,
-            )
-                .values(walletId, policyId, periodType.name, periodStart.atOffset(ZoneOffset.UTC), BigDecimal.ZERO, 0)
-                .onConflict(
-                    LIMIT_CONSUMPTIONS.WALLET_ID,
-                    LIMIT_CONSUMPTIONS.POLICY_ID,
-                    LIMIT_CONSUMPTIONS.PERIOD_TYPE,
-                    LIMIT_CONSUMPTIONS.PERIOD_START,
-                )
-                .doNothing()
-                .execute()
-
-            val consumptionRecord = tx
-                .select(LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT, LIMIT_CONSUMPTIONS.TRANSACTION_COUNT)
-                .from(LIMIT_CONSUMPTIONS)
-                .where(LIMIT_CONSUMPTIONS.WALLET_ID.eq(walletId))
-                .and(LIMIT_CONSUMPTIONS.POLICY_ID.eq(policyId))
-                .and(LIMIT_CONSUMPTIONS.PERIOD_TYPE.eq(periodType.name))
-                .and(LIMIT_CONSUMPTIONS.PERIOD_START.eq(periodStart.atOffset(ZoneOffset.UTC)))
-                .forUpdate()
+        if (!idempotencyInserted) {
+            val existing = tx.selectFrom(PAYMENT_IDEMPOTENCY_KEYS)
+                .where(PAYMENT_IDEMPOTENCY_KEYS.WALLET_ID.eq(walletId))
+                .and(PAYMENT_IDEMPOTENCY_KEYS.IDEMPOTENCY_KEY.eq(idempotencyKey))
                 .fetchOne()
+                ?: error("Idempotency key not found after ON CONFLICT")
 
-            val consumedAmount = consumptionRecord?.get(LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT) ?: BigDecimal.ZERO
-            val transactionCount = consumptionRecord?.get(LIMIT_CONSUMPTIONS.TRANSACTION_COUNT) ?: 0
-
-            if (!checkLimit(consumedAmount, transactionCount)) {
-                tx.update(PAYMENT_IDEMPOTENCY_KEYS)
-                    .set(PAYMENT_IDEMPOTENCY_KEYS.RESPONSE_STATUS, 422)
-                    .set(PAYMENT_IDEMPOTENCY_KEYS.UPDATED_AT, OffsetDateTime.now())
-                    .where(PAYMENT_IDEMPOTENCY_KEYS.WALLET_ID.eq(walletId))
-                    .and(PAYMENT_IDEMPOTENCY_KEYS.IDEMPOTENCY_KEY.eq(idempotencyKey))
-                    .execute()
-
-                tx.insertInto(PAYMENT_AUDIT_EVENTS)
-                    .set(PAYMENT_AUDIT_EVENTS.WALLET_ID, walletId)
-                    .set(PAYMENT_AUDIT_EVENTS.PAYMENT_ID, null as UUID?)
-                    .set(PAYMENT_AUDIT_EVENTS.POLICY_ID, policyId)
-                    .set(PAYMENT_AUDIT_EVENTS.IDEMPOTENCY_KEY, idempotencyKey)
-                    .set(PAYMENT_AUDIT_EVENTS.REQUEST_ID, requestId)
-                    .set(PAYMENT_AUDIT_EVENTS.AMOUNT, amount)
-                    .set(PAYMENT_AUDIT_EVENTS.STATUS, "REJECTED")
-                    .set(PAYMENT_AUDIT_EVENTS.REASON, "LIMIT_EXCEEDED")
-                    .set(PAYMENT_AUDIT_EVENTS.OCCURRED_AT, now)
-                    .set(PAYMENT_AUDIT_EVENTS.CREATED_AT, now)
-                    .execute()
-
-            val rejectedEvent = OutboxEventBO(
-                aggregateType = "payment",
-                aggregateId = walletId.toString(),
-                eventType = "PAYMENT_REJECTED",
-                payload = "{\"walletId\":\"$walletId\",\"policyId\":\"$policyId\",\"amount\":$amount,\"idempotencyKey\":\"$idempotencyKey\",\"reason\":\"LIMIT_EXCEEDED\"}",
-            )
-            outboxGateway.save(rejectedEvent, com.trace.payment.adapters.database.gateway.JooqTransactionContext(tx))
-
-            logger.info("Payment rejected: walletId={}, amount={}, reason=LIMIT_EXCEEDED", walletId, amount)
-
-            return@transactionResult TransactionResult.Rejected
+            return if (existing.get(PAYMENT_IDEMPOTENCY_KEYS.REQUEST_HASH) == requestHash) {
+                val paymentId = existing.get(PAYMENT_IDEMPOTENCY_KEYS.PAYMENT_ID)
+                val status = existing.get(PAYMENT_IDEMPOTENCY_KEYS.RESPONSE_STATUS) ?: 422
+                val payment = paymentId?.let { findByIdInternal(tx, it) }
+                TransactionResult.IdempotentReplay(status, payment)
+            } else {
+                TransactionResult.Conflict
+            }
         }
 
-            val paymentRecord = tx
-                .insertInto(PAYMENTS)
-                .set(PAYMENTS.ID, UUID.randomUUID())
-                .set(PAYMENTS.WALLET_ID, walletId)
-                .set(PAYMENTS.POLICY_ID, policyId)
-                .set(PAYMENTS.AMOUNT, amount)
-                .set(PAYMENTS.OCCURRED_AT, occurredAt.atOffset(ZoneOffset.UTC))
-                .set(PAYMENTS.PERIOD_TYPE, periodType.name)
-                .set(PAYMENTS.PERIOD_START, periodStart.atOffset(ZoneOffset.UTC))
-                .set(PAYMENTS.STATUS, "APPROVED")
-                .set(PAYMENTS.CREATED_AT, now)
-                .set(PAYMENTS.UPDATED_AT, now)
-                .returning()
-                .fetchOne() ?: error("Payment insert did not return a row")
-
-            tx.insertInto(
-                LIMIT_CONSUMPTIONS,
+        tx.insertInto(
+            LIMIT_CONSUMPTIONS,
+            LIMIT_CONSUMPTIONS.WALLET_ID,
+            LIMIT_CONSUMPTIONS.POLICY_ID,
+            LIMIT_CONSUMPTIONS.PERIOD_TYPE,
+            LIMIT_CONSUMPTIONS.PERIOD_START,
+            LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT,
+            LIMIT_CONSUMPTIONS.TRANSACTION_COUNT,
+        )
+            .values(walletId, policyId, periodType.name, periodStart.atOffset(ZoneOffset.UTC), BigDecimal.ZERO, 0)
+            .onConflict(
                 LIMIT_CONSUMPTIONS.WALLET_ID,
                 LIMIT_CONSUMPTIONS.POLICY_ID,
                 LIMIT_CONSUMPTIONS.PERIOD_TYPE,
                 LIMIT_CONSUMPTIONS.PERIOD_START,
-                LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT,
-                LIMIT_CONSUMPTIONS.TRANSACTION_COUNT,
             )
-                .values(walletId, policyId, periodType.name, periodStart.atOffset(ZoneOffset.UTC), amount, 1)
-                .onConflict(
-                    LIMIT_CONSUMPTIONS.WALLET_ID,
-                    LIMIT_CONSUMPTIONS.POLICY_ID,
-                    LIMIT_CONSUMPTIONS.PERIOD_TYPE,
-                    LIMIT_CONSUMPTIONS.PERIOD_START,
-                )
-                .doUpdate()
-                .set(LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT, LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT.plus(amount))
-                .set(LIMIT_CONSUMPTIONS.TRANSACTION_COUNT, LIMIT_CONSUMPTIONS.TRANSACTION_COUNT.plus(1))
-                .execute()
+            .doNothing()
+            .execute()
 
+        val consumptionRecord = tx
+            .select(LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT, LIMIT_CONSUMPTIONS.TRANSACTION_COUNT)
+            .from(LIMIT_CONSUMPTIONS)
+            .where(LIMIT_CONSUMPTIONS.WALLET_ID.eq(walletId))
+            .and(LIMIT_CONSUMPTIONS.POLICY_ID.eq(policyId))
+            .and(LIMIT_CONSUMPTIONS.PERIOD_TYPE.eq(periodType.name))
+            .and(LIMIT_CONSUMPTIONS.PERIOD_START.eq(periodStart.atOffset(ZoneOffset.UTC)))
+            .forUpdate()
+            .fetchOne()
+
+        val consumedAmount = consumptionRecord?.get(LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT) ?: BigDecimal.ZERO
+        val transactionCount = consumptionRecord?.get(LIMIT_CONSUMPTIONS.TRANSACTION_COUNT) ?: 0
+
+        if (!checkLimit(consumedAmount, transactionCount)) {
             tx.update(PAYMENT_IDEMPOTENCY_KEYS)
-                .set(PAYMENT_IDEMPOTENCY_KEYS.PAYMENT_ID, paymentRecord.get(PAYMENTS.ID))
-                .set(PAYMENT_IDEMPOTENCY_KEYS.RESPONSE_STATUS, 201)
+                .set(PAYMENT_IDEMPOTENCY_KEYS.RESPONSE_STATUS, 422)
                 .set(PAYMENT_IDEMPOTENCY_KEYS.UPDATED_AT, OffsetDateTime.now())
                 .where(PAYMENT_IDEMPOTENCY_KEYS.WALLET_ID.eq(walletId))
                 .and(PAYMENT_IDEMPOTENCY_KEYS.IDEMPOTENCY_KEY.eq(idempotencyKey))
@@ -211,43 +155,97 @@ class PaymentGatewayImpl(
 
             tx.insertInto(PAYMENT_AUDIT_EVENTS)
                 .set(PAYMENT_AUDIT_EVENTS.WALLET_ID, walletId)
-                .set(PAYMENT_AUDIT_EVENTS.PAYMENT_ID, paymentRecord.get(PAYMENTS.ID))
+                .set(PAYMENT_AUDIT_EVENTS.PAYMENT_ID, null as UUID?)
                 .set(PAYMENT_AUDIT_EVENTS.POLICY_ID, policyId)
                 .set(PAYMENT_AUDIT_EVENTS.IDEMPOTENCY_KEY, idempotencyKey)
                 .set(PAYMENT_AUDIT_EVENTS.REQUEST_ID, requestId)
                 .set(PAYMENT_AUDIT_EVENTS.AMOUNT, amount)
-                .set(PAYMENT_AUDIT_EVENTS.STATUS, "APPROVED")
-                .set(PAYMENT_AUDIT_EVENTS.REASON, null as String?)
+                .set(PAYMENT_AUDIT_EVENTS.STATUS, "REJECTED")
+                .set(PAYMENT_AUDIT_EVENTS.REASON, "LIMIT_EXCEEDED")
                 .set(PAYMENT_AUDIT_EVENTS.OCCURRED_AT, now)
                 .set(PAYMENT_AUDIT_EVENTS.CREATED_AT, now)
                 .execute()
 
-            val paymentId = paymentRecord.get(PAYMENTS.ID)
-            val approvedEvent = OutboxEventBO(
-                aggregateType = "payment",
-                aggregateId = paymentId.toString(),
-                eventType = "PAYMENT_APPROVED",
-                payload = """{"id":"$paymentId","walletId":"$walletId","policyId":"$policyId","amount":$amount,"status":"APPROVED","occurredAt":"$occurredAt"}""",
-            )
-            outboxGateway.save(approvedEvent, com.trace.payment.adapters.database.gateway.JooqTransactionContext(tx))
+            logger.info("Payment rejected: walletId={}, amount={}, reason=LIMIT_EXCEEDED", walletId, amount)
 
-            logger.info("Payment approved: walletId={}, paymentId={}, amount={}", walletId, paymentId, amount)
-
-            TransactionResult.Approved(
-                PaymentEntity(
-                    id = paymentId,
-                    walletId = paymentRecord.get(PAYMENTS.WALLET_ID),
-                    policyId = paymentRecord.get(PAYMENTS.POLICY_ID),
-                    amount = paymentRecord.get(PAYMENTS.AMOUNT),
-                    occurredAt = paymentRecord.get(PAYMENTS.OCCURRED_AT).toInstant(),
-                    periodType = PeriodType.valueOf(paymentRecord.get(PAYMENTS.PERIOD_TYPE)),
-                    periodStart = paymentRecord.get(PAYMENTS.PERIOD_START).toInstant(),
-                    status = paymentRecord.get(PAYMENTS.STATUS),
-                    createdAt = paymentRecord.get(PAYMENTS.CREATED_AT).toInstant(),
-                    updatedAt = paymentRecord.get(PAYMENTS.UPDATED_AT).toInstant(),
-                ),
-            )
+            return TransactionResult.Rejected
         }
+
+        val paymentRecord = tx
+            .insertInto(PAYMENTS)
+            .set(PAYMENTS.ID, UUID.randomUUID())
+            .set(PAYMENTS.WALLET_ID, walletId)
+            .set(PAYMENTS.POLICY_ID, policyId)
+            .set(PAYMENTS.AMOUNT, amount)
+            .set(PAYMENTS.OCCURRED_AT, occurredAt.atOffset(ZoneOffset.UTC))
+            .set(PAYMENTS.PERIOD_TYPE, periodType.name)
+            .set(PAYMENTS.PERIOD_START, periodStart.atOffset(ZoneOffset.UTC))
+            .set(PAYMENTS.STATUS, "APPROVED")
+            .set(PAYMENTS.CREATED_AT, now)
+            .set(PAYMENTS.UPDATED_AT, now)
+            .returning()
+            .fetchOne() ?: error("Payment insert did not return a row")
+
+        tx.insertInto(
+            LIMIT_CONSUMPTIONS,
+            LIMIT_CONSUMPTIONS.WALLET_ID,
+            LIMIT_CONSUMPTIONS.POLICY_ID,
+            LIMIT_CONSUMPTIONS.PERIOD_TYPE,
+            LIMIT_CONSUMPTIONS.PERIOD_START,
+            LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT,
+            LIMIT_CONSUMPTIONS.TRANSACTION_COUNT,
+        )
+            .values(walletId, policyId, periodType.name, periodStart.atOffset(ZoneOffset.UTC), amount, 1)
+            .onConflict(
+                LIMIT_CONSUMPTIONS.WALLET_ID,
+                LIMIT_CONSUMPTIONS.POLICY_ID,
+                LIMIT_CONSUMPTIONS.PERIOD_TYPE,
+                LIMIT_CONSUMPTIONS.PERIOD_START,
+            )
+            .doUpdate()
+            .set(LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT, LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT.plus(amount))
+            .set(LIMIT_CONSUMPTIONS.TRANSACTION_COUNT, LIMIT_CONSUMPTIONS.TRANSACTION_COUNT.plus(1))
+            .execute()
+
+        tx.update(PAYMENT_IDEMPOTENCY_KEYS)
+            .set(PAYMENT_IDEMPOTENCY_KEYS.PAYMENT_ID, paymentRecord.get(PAYMENTS.ID))
+            .set(PAYMENT_IDEMPOTENCY_KEYS.RESPONSE_STATUS, 201)
+            .set(PAYMENT_IDEMPOTENCY_KEYS.UPDATED_AT, OffsetDateTime.now())
+            .where(PAYMENT_IDEMPOTENCY_KEYS.WALLET_ID.eq(walletId))
+            .and(PAYMENT_IDEMPOTENCY_KEYS.IDEMPOTENCY_KEY.eq(idempotencyKey))
+            .execute()
+
+        tx.insertInto(PAYMENT_AUDIT_EVENTS)
+            .set(PAYMENT_AUDIT_EVENTS.WALLET_ID, walletId)
+            .set(PAYMENT_AUDIT_EVENTS.PAYMENT_ID, paymentRecord.get(PAYMENTS.ID))
+            .set(PAYMENT_AUDIT_EVENTS.POLICY_ID, policyId)
+            .set(PAYMENT_AUDIT_EVENTS.IDEMPOTENCY_KEY, idempotencyKey)
+            .set(PAYMENT_AUDIT_EVENTS.REQUEST_ID, requestId)
+            .set(PAYMENT_AUDIT_EVENTS.AMOUNT, amount)
+            .set(PAYMENT_AUDIT_EVENTS.STATUS, "APPROVED")
+            .set(PAYMENT_AUDIT_EVENTS.REASON, null as String?)
+            .set(PAYMENT_AUDIT_EVENTS.OCCURRED_AT, now)
+            .set(PAYMENT_AUDIT_EVENTS.CREATED_AT, now)
+            .execute()
+
+        val paymentId = paymentRecord.get(PAYMENTS.ID)
+
+        logger.info("Payment approved: walletId={}, paymentId={}, amount={}", walletId, paymentId, amount)
+
+        return TransactionResult.Approved(
+            PaymentEntity(
+                id = paymentId,
+                walletId = paymentRecord.get(PAYMENTS.WALLET_ID),
+                policyId = paymentRecord.get(PAYMENTS.POLICY_ID),
+                amount = paymentRecord.get(PAYMENTS.AMOUNT),
+                occurredAt = paymentRecord.get(PAYMENTS.OCCURRED_AT).toInstant(),
+                periodType = PeriodType.valueOf(paymentRecord.get(PAYMENTS.PERIOD_TYPE)),
+                periodStart = paymentRecord.get(PAYMENTS.PERIOD_START).toInstant(),
+                status = paymentRecord.get(PAYMENTS.STATUS),
+                createdAt = paymentRecord.get(PAYMENTS.CREATED_AT).toInstant(),
+                updatedAt = paymentRecord.get(PAYMENTS.UPDATED_AT).toInstant(),
+            ),
+        )
     }
 
     override fun findById(paymentId: UUID): PaymentEntity? {

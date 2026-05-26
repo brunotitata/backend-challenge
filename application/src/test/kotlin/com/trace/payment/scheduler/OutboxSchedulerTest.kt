@@ -6,6 +6,8 @@ import com.trace.payment.boundary.database.OutboxGatewaySpec
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import com.trace.payment.boundary.common.TransactionContext
+import java.time.Instant
 
 class OutboxSchedulerTest {
 
@@ -21,7 +23,7 @@ class OutboxSchedulerTest {
         }
 
         override fun save(event: OutboxEventBO) {}
-        override fun save(event: OutboxEventBO, tx: com.trace.payment.boundary.common.TransactionContext) {}
+        override fun save(event: OutboxEventBO, tx: TransactionContext) {}
         override fun findUnprocessed(limit: Int): List<OutboxEventBO> {
             return events.filter { it.processedAt == null }.take(limit)
         }
@@ -30,7 +32,7 @@ class OutboxSchedulerTest {
             markedProcessed.add(id)
             val idx = events.indexOfFirst { it.id == id }
             if (idx >= 0) {
-                events[idx] = events[idx].copy(processedAt = java.time.Instant.now())
+                events[idx] = events[idx].copy(processedAt = Instant.now())
             }
         }
 

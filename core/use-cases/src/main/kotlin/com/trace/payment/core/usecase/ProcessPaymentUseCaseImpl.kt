@@ -1,6 +1,9 @@
 package com.trace.payment.core.usecase
 
+import com.trace.payment.boundary.common.OutboxEventBO
+import com.trace.payment.boundary.database.OutboxGatewaySpec
 import com.trace.payment.boundary.database.PaymentGatewaySpec
+import com.trace.payment.boundary.database.TransactionManagerSpec
 import com.trace.payment.boundary.database.TransactionResult
 import com.trace.payment.boundary.database.WalletDAOSpec
 import com.trace.payment.boundary.exceptions.ConflictException
@@ -13,6 +16,9 @@ import com.trace.payment.boundary.input.ProcessPaymentUseCaseSpec
 import com.trace.payment.core.entities.PeriodClassifier
 import com.trace.payment.core.entities.PeriodType
 import com.trace.payment.core.entities.PaymentEntity
+import com.trace.payment.core.usecase.events.PaymentApprovedEvent
+import com.trace.payment.core.usecase.events.PaymentRejectedEvent
+import kotlinx.serialization.json.Json
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.ZoneId
@@ -23,6 +29,8 @@ class ProcessPaymentUseCaseImpl(
     private val policyResolver: PolicyResolverSpec,
     private val policyEvaluatorRegistry: PolicyEvaluatorRegistrySpec,
     private val paymentGateway: PaymentGatewaySpec,
+    private val outboxGateway: OutboxGatewaySpec,
+    private val transactionManager: TransactionManagerSpec,
 ) : ProcessPaymentUseCaseSpec {
 
     private val zone = ZoneId.of("America/Sao_Paulo")
@@ -65,31 +73,80 @@ class ProcessPaymentUseCaseImpl(
             classification.periodType to classification.periodStart
         }
 
-        val result = paymentGateway.processPaymentInTransaction(
-            walletId = walletId,
-            policyId = policy.id,
-            amount = amount,
-            occurredAt = occurredAt,
-            periodType = limitPeriodType,
-            periodStart = limitPeriodStart,
-            idempotencyKey = idempotencyKey,
-            requestHash = hash,
-            requestId = requestId,
-            checkLimit = { consumedAmount, transactionCount ->
-                val evaluation = evaluator.evaluate(policy, amount, consumedAmount, classification.periodType, transactionCount)
-                evaluation.approved
-            },
-        )
+        return transactionManager.runInTransaction { tx ->
+            val result = paymentGateway.processPayment(
+                walletId = walletId,
+                policyId = policy.id,
+                amount = amount,
+                occurredAt = occurredAt,
+                periodType = limitPeriodType,
+                periodStart = limitPeriodStart,
+                idempotencyKey = idempotencyKey,
+                requestHash = hash,
+                requestId = requestId,
+                checkLimit = { consumedAmount, transactionCount ->
+                    val evaluation = evaluator.evaluate(policy, amount, consumedAmount, classification.periodType, transactionCount)
+                    evaluation.approved
+                },
+                tx = tx,
+            )
 
-        return when (result) {
-            is TransactionResult.Approved -> result.payment
-            is TransactionResult.Rejected -> throw UnprocessableEntityException("Payment rejected: limit exceeded")
-            is TransactionResult.Conflict -> throw ConflictException("Idempotency key already used with different payload")
-            is TransactionResult.IdempotentReplay -> {
-                if (result.statusCode == 422) {
+            when (result) {
+                is TransactionResult.Approved -> {
+                    val payload = Json.encodeToString(
+                        PaymentApprovedEvent.serializer(),
+                        PaymentApprovedEvent(
+                            id = result.payment.id.toString(),
+                            walletId = result.payment.walletId.toString(),
+                            policyId = result.payment.policyId.toString(),
+                            amount = result.payment.amount.toString(),
+                            status = result.payment.status,
+                            occurredAt = result.payment.occurredAt.toString(),
+                        ),
+                    )
+                    outboxGateway.save(
+                        OutboxEventBO(
+                            aggregateType = "payment",
+                            aggregateId = result.payment.id.toString(),
+                            eventType = "PAYMENT_APPROVED",
+                            payload = payload,
+                        ),
+                        tx,
+                    )
+                    result.payment
+                }
+
+                is TransactionResult.Rejected -> {
+                    val payload = Json.encodeToString(
+                        PaymentRejectedEvent.serializer(),
+                        PaymentRejectedEvent(
+                            walletId = walletId.toString(),
+                            policyId = policy.id.toString(),
+                            amount = amount.toString(),
+                            idempotencyKey = idempotencyKey,
+                            reason = "LIMIT_EXCEEDED",
+                        ),
+                    )
+                    outboxGateway.save(
+                        OutboxEventBO(
+                            aggregateType = "payment",
+                            aggregateId = walletId.toString(),
+                            eventType = "PAYMENT_REJECTED",
+                            payload = payload,
+                        ),
+                        tx,
+                    )
                     throw UnprocessableEntityException("Payment rejected: limit exceeded")
                 }
-                result.payment ?: throw NotFoundException("Original payment not found")
+
+                is TransactionResult.Conflict -> throw ConflictException("Idempotency key already used with different payload")
+
+                is TransactionResult.IdempotentReplay -> {
+                    if (result.statusCode == 422) {
+                        throw UnprocessableEntityException("Payment rejected: limit exceeded")
+                    }
+                    result.payment ?: throw NotFoundException("Original payment not found")
+                }
             }
         }
     }

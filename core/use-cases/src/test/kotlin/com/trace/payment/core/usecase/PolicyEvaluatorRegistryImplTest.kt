@@ -9,6 +9,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertSame
+import java.util.UUID
+import java.time.Instant
 
 class PolicyEvaluatorRegistryImplTest {
 
@@ -79,7 +81,7 @@ class PolicyEvaluatorRegistryImplTest {
         registry.register("VALUE_LIMIT", valueEvaluator)
         val evaluator = registry.get("VALUE_LIMIT")!!
         val policy = PolicyEntity(
-            id = java.util.UUID.randomUUID(),
+            id = UUID.randomUUID(),
             name = "TEST",
             category = "VALUE_LIMIT",
             maxPerPayment = BigDecimal("1000.00"),
@@ -87,8 +89,8 @@ class PolicyEvaluatorRegistryImplTest {
             nighttimeDailyLimit = BigDecimal("1000.00"),
             weekendDailyLimit = BigDecimal("1000.00"),
             dailyTransactionLimit = null,
-            createdAt = java.time.Instant.now(),
-            updatedAt = java.time.Instant.now(),
+            createdAt = Instant.now(),
+            updatedAt = Instant.now(),
         )
         val result = evaluator.evaluate(policy, BigDecimal("100.00"), BigDecimal.ZERO, PeriodType.DAYTIME, 0)
         assertEquals(true, result.approved)

@@ -1,5 +1,6 @@
 package com.trace.payment.core.usecase
 
+import com.trace.payment.boundary.common.TransactionContext
 import com.trace.payment.boundary.database.PolicyDAOSpec
 import com.trace.payment.boundary.exceptions.ValidationException
 import com.trace.payment.core.entities.PolicyEntity
@@ -15,7 +16,7 @@ class CreatePolicyUseCaseImplTest {
     private val savedPolicies = mutableListOf<PolicyEntity>()
 
     private val policyDAO = object : PolicyDAOSpec {
-        override fun save(policy: PolicyEntity): PolicyEntity {
+        override fun save(policy: PolicyEntity, tx: TransactionContext): PolicyEntity {
             savedPolicies.add(policy)
             return policy
         }
@@ -24,10 +25,10 @@ class CreatePolicyUseCaseImplTest {
         override fun findByWalletId(walletId: UUID): List<PolicyEntity> = emptyList()
         override fun findById(policyId: UUID): PolicyEntity? = null
         override fun findActiveByWalletId(walletId: UUID): PolicyEntity? = null
-        override fun assignPolicy(walletId: UUID, policyId: UUID) {}
+        override fun assignPolicy(walletId: UUID, policyId: UUID, tx: TransactionContext) {}
     }
 
-    private val useCase = CreatePolicyUseCaseImpl(policyDAO)
+    private val useCase = CreatePolicyUseCaseImpl(policyDAO, FakeOutboxGateway, FakeTransactionManager)
 
     @Test
     fun `creates VALUE_LIMIT policy with valid data`() {

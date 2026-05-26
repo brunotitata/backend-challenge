@@ -1,5 +1,6 @@
 package com.trace.payment.core.usecase
 
+import com.trace.payment.boundary.common.TransactionContext
 import com.trace.payment.boundary.database.PolicyDAOSpec
 import com.trace.payment.boundary.database.WalletDAOSpec
 import com.trace.payment.boundary.exceptions.NotFoundException
@@ -10,6 +11,7 @@ import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import com.trace.payment.core.entities.WalletEntity
 
 class AssignPolicyUseCaseImplTest {
 
@@ -35,21 +37,21 @@ class AssignPolicyUseCaseImplTest {
         policyFound: PolicyEntity? = policy,
     ): AssignPolicyUseCaseImpl {
         val walletDAO = object : WalletDAOSpec {
-            override fun save(wallet: com.trace.payment.core.entities.WalletEntity) = wallet
+            override fun save(wallet: WalletEntity, tx: TransactionContext) = wallet
             override fun findActivePolicyName(walletId: UUID): String? = null
             override fun existsById(walletId: UUID): Boolean = walletExists
         }
 
         val policyDAO = object : PolicyDAOSpec {
-            override fun save(policy: PolicyEntity): PolicyEntity = policy
+            override fun save(policy: PolicyEntity, tx: TransactionContext): PolicyEntity = policy
             override fun findAll(): List<PolicyEntity> = emptyList()
             override fun findByWalletId(walletId: UUID): List<PolicyEntity> = emptyList()
             override fun findById(policyId: UUID): PolicyEntity? = policyFound
             override fun findActiveByWalletId(walletId: UUID): PolicyEntity? = null
-            override fun assignPolicy(walletId: UUID, policyId: UUID) {}
+            override fun assignPolicy(walletId: UUID, policyId: UUID, tx: TransactionContext) {}
         }
 
-        return AssignPolicyUseCaseImpl(policyDAO, walletDAO)
+        return AssignPolicyUseCaseImpl(policyDAO, walletDAO, FakeOutboxGateway, FakeTransactionManager)
     }
 
     @Test

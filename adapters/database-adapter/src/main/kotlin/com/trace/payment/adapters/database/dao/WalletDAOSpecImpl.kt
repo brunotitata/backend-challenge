@@ -3,8 +3,6 @@ package com.trace.payment.adapters.database.dao
 import com.trace.payment.adapters.database.jooq.tables.Policies.POLICIES
 import com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES
 import com.trace.payment.adapters.database.jooq.tables.Wallets.WALLETS
-import com.trace.payment.boundary.common.OutboxEventBO
-import com.trace.payment.boundary.database.OutboxGatewaySpec
 import com.trace.payment.boundary.database.WalletDAOSpec
 import com.trace.payment.core.entities.WalletEntity
 import org.jooq.DSLContext
@@ -12,27 +10,19 @@ import org.jooq.impl.DSL
 import java.math.BigDecimal
 import java.time.ZoneOffset
 import java.util.UUID
+import com.trace.payment.adapters.database.gateway.JooqTransactionContext
+import com.trace.payment.boundary.common.TransactionContext
 
 class WalletDAOSpecImpl(
     private val dsl: DSLContext,
-    private val outboxGateway: OutboxGatewaySpec,
 ) : WalletDAOSpec {
 
-    override fun save(wallet: WalletEntity): WalletEntity {
-        return dsl.transactionResult { configuration ->
-            val tx = DSL.using(configuration)
-            ensureDefaultPolicy(tx)
-            val savedWallet = insertWallet(tx, wallet)
-            insertDefaultActivePolicy(tx, savedWallet.id)
-            val event = OutboxEventBO(
-                aggregateType = "wallet",
-                aggregateId = savedWallet.id.toString(),
-                eventType = "WALLET_CREATED",
-                payload = """{"id":"${savedWallet.id}","ownerName":"${savedWallet.ownerName}"}""",
-            )
-            outboxGateway.save(event, com.trace.payment.adapters.database.gateway.JooqTransactionContext(tx))
-            savedWallet
-        }
+    override fun save(wallet: WalletEntity, tx: TransactionContext): WalletEntity {
+        val jooqTx = tx as JooqTransactionContext
+        ensureDefaultPolicy(jooqTx.dsl)
+        val savedWallet = insertWallet(jooqTx.dsl, wallet)
+        insertDefaultActivePolicy(jooqTx.dsl, savedWallet.id)
+        return savedWallet
     }
 
     override fun findActivePolicyName(walletId: UUID): String? {

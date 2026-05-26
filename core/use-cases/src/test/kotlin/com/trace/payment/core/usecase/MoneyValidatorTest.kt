@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import java.math.BigDecimal
+import com.trace.payment.boundary.exceptions.ValidationException
 
 class MoneyValidatorTest {
 
@@ -24,7 +25,7 @@ class MoneyValidatorTest {
 
     @Test
     fun `rejects amount with more than two decimal places`() {
-        val exception = assertFailsWith<com.trace.payment.boundary.exceptions.ValidationException> {
+        val exception = assertFailsWith<ValidationException> {
             MoneyValidator.requireValid("amount", BigDecimal("100.001"))
         }
         assertEquals("amount must have at most 2 decimal places", exception.message)
@@ -32,7 +33,7 @@ class MoneyValidatorTest {
 
     @Test
     fun `rejects amount with three decimal places`() {
-        val exception = assertFailsWith<com.trace.payment.boundary.exceptions.ValidationException> {
+        val exception = assertFailsWith<ValidationException> {
             MoneyValidator.requireValid("amount", BigDecimal("0.999"))
         }
         assertEquals("amount must have at most 2 decimal places", exception.message)
@@ -40,7 +41,7 @@ class MoneyValidatorTest {
 
     @Test
     fun `rejects amount exceeding numeric precision`() {
-        val exception = assertFailsWith<com.trace.payment.boundary.exceptions.ValidationException> {
+        val exception = assertFailsWith<ValidationException> {
             MoneyValidator.requireValid("amount", BigDecimal("999999999999999999.99"))
         }
         assertEquals("amount must fit NUMERIC(19, 2)", exception.message)
@@ -53,7 +54,7 @@ class MoneyValidatorTest {
 
     @Test
     fun `rejects very large amount with many digits`() {
-        val exception = assertFailsWith<com.trace.payment.boundary.exceptions.ValidationException> {
+        val exception = assertFailsWith<ValidationException> {
             MoneyValidator.requireValid("amount", BigDecimal("12345678901234567890.00"))
         }
         assertEquals("amount must fit NUMERIC(19, 2)", exception.message)
@@ -61,7 +62,7 @@ class MoneyValidatorTest {
 
     @Test
     fun `uses field name in error message`() {
-        val exception = assertFailsWith<com.trace.payment.boundary.exceptions.ValidationException> {
+        val exception = assertFailsWith<ValidationException> {
             MoneyValidator.requireValid("daytimeDailyLimit", BigDecimal("100.001"))
         }
         assertEquals("daytimeDailyLimit must have at most 2 decimal places", exception.message)
