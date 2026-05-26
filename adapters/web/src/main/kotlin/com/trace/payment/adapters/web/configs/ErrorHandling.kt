@@ -57,14 +57,14 @@ fun Application.configureErrorHandling() {
             )
         }
 
-        exception<DateTimeParseException> { call, cause ->
+        exception<DateTimeParseException> { call, _ ->
             call.respond(
                 HttpStatusCode.BadRequest,
                 ErrorResponseDTO(error = ErrorDTO(code = "BAD_REQUEST", message = "Invalid date format")),
             )
         }
 
-        exception<NumberFormatException> { call, cause ->
+        exception<NumberFormatException> { call, _ ->
             call.respond(
                 HttpStatusCode.BadRequest,
                 ErrorResponseDTO(error = ErrorDTO(code = "BAD_REQUEST", message = "Invalid number format")),
