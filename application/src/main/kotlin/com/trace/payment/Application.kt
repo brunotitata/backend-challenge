@@ -1,10 +1,13 @@
 package com.trace.payment
 
+import com.rabbitmq.client.ConnectionFactory
 import com.trace.payment.adapters.database.config.DatabaseFactory
 import com.trace.payment.adapters.database.config.JooqFactory
 import com.trace.payment.adapters.database.dao.PolicyDAOSpecImpl
 import com.trace.payment.adapters.database.dao.WalletDAOSpecImpl
+import com.trace.payment.adapters.database.gateway.OutboxGatewayImpl
 import com.trace.payment.adapters.database.gateway.PaymentGatewayImpl
+import com.trace.payment.adapters.message.RabbitMqEventPublisher
 import com.trace.payment.adapters.web.configs.configureErrorHandling
 import com.trace.payment.adapters.web.configs.configureMetrics
 import com.trace.payment.adapters.web.configs.configureRequestId
@@ -25,6 +28,7 @@ import com.trace.payment.core.usecase.PolicyResolverImpl
 import com.trace.payment.core.usecase.ProcessPaymentUseCaseImpl
 import com.trace.payment.core.usecase.TxCountLimitEvaluator
 import com.trace.payment.core.usecase.ValueLimitEvaluator
+import com.trace.payment.scheduler.OutboxScheduler
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.application.*
@@ -37,9 +41,10 @@ fun main() {
         }
         val dsl = JooqFactory.create(dataSource)
 
-        val walletDAO = WalletDAOSpecImpl(dsl)
-        val policyDAO = PolicyDAOSpecImpl(dsl)
-        val paymentGateway = PaymentGatewayImpl(dsl)
+        val outboxGateway = OutboxGatewayImpl(dsl)
+        val walletDAO = WalletDAOSpecImpl(dsl, outboxGateway)
+        val policyDAO = PolicyDAOSpecImpl(dsl, outboxGateway)
+        val paymentGateway = PaymentGatewayImpl(dsl, outboxGateway)
 
         val policyResolver = PolicyResolverImpl(policyDAO)
         val policyRegistry = PolicyEvaluatorRegistryImpl().apply {
@@ -54,6 +59,30 @@ fun main() {
         val assignPolicyUseCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO)
         val processPaymentUseCase = ProcessPaymentUseCaseImpl(walletDAO, policyResolver, policyRegistry, paymentGateway)
         val listPaymentsUseCase = ListPaymentsUseCaseImpl(walletDAO, paymentGateway)
+
+        val rabbitHost = System.getenv("RABBITMQ_HOST") ?: "localhost"
+        val rabbitPort = System.getenv("RABBITMQ_PORT")?.toIntOrNull() ?: 5672
+        val rabbitUser = System.getenv("RABBITMQ_USER") ?: "payment"
+        val rabbitPass = System.getenv("RABBITMQ_PASS") ?: "payment"
+        val exchangeName = System.getenv("RABBITMQ_EXCHANGE") ?: "payment.events"
+
+        val connectionFactory = ConnectionFactory().apply {
+            host = rabbitHost
+            port = rabbitPort
+            username = rabbitUser
+            password = rabbitPass
+        }
+        val eventPublisher = RabbitMqEventPublisher(connectionFactory)
+
+        val scheduler = OutboxScheduler(
+            outboxGateway = outboxGateway,
+            eventPublisher = eventPublisher,
+            exchangeName = exchangeName,
+        )
+        scheduler.start()
+        environment.monitor.subscribe(ApplicationStopped) {
+            scheduler.stop()
+        }
 
         configureSerialization()
         configureErrorHandling()

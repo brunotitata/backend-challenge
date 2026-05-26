@@ -19,6 +19,7 @@ dependencies {
     implementation(project(":input-boundary"))
     implementation(project(":common"))
     implementation(project(":database-adapter"))
+    implementation(project(":message-adapter"))
     implementation(project(":web"))
 
     implementation("io.ktor:ktor-server-netty:$ktorVersion")
