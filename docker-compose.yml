@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: trace-challenge
+    container_name: trace-challenge-postgres
     environment:
       POSTGRES_DB: payment_api
       POSTGRES_USER: payment_api
@@ -15,6 +15,22 @@ services:
       retries: 10
     volumes:
       - postgres-data:/var/lib/postgresql/data
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trace-challenge-app
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/payment_api
+      DATABASE_USER: payment_api
+      DATABASE_PASSWORD: payment_api
+      PORT: 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres-data:
