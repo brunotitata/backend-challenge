@@ -4,6 +4,7 @@ import com.trace.payment.adapters.database.config.DatabaseFactory
 import com.trace.payment.adapters.database.config.JooqFactory
 import com.trace.payment.adapters.database.dao.PolicyDAOSpecImpl
 import com.trace.payment.adapters.database.dao.WalletDAOSpecImpl
+import com.trace.payment.adapters.database.gateway.OutboxGatewayImpl
 import com.trace.payment.adapters.web.configs.configureErrorHandling
 import com.trace.payment.adapters.web.configs.configureSerialization
 import com.trace.payment.adapters.web.routes.configurePolicyRoutes
@@ -54,8 +55,9 @@ class PolicyIntegrationTest {
             ),
         )
         dsl = JooqFactory.create(dataSource)
-        policyDAO = PolicyDAOSpecImpl(dsl)
-        walletDAO = WalletDAOSpecImpl(dsl)
+        val outboxGateway = OutboxGatewayImpl(dsl)
+        policyDAO = PolicyDAOSpecImpl(dsl, outboxGateway)
+        walletDAO = WalletDAOSpecImpl(dsl, outboxGateway)
         dataSource.connection.use { connection ->
             connection.createStatement().use { statement ->
                 statement.execute("TRUNCATE TABLE wallet_policies, policies, wallets RESTART IDENTITY CASCADE")
@@ -413,8 +415,9 @@ class PolicyIntegrationTest {
     }
 
     private fun Application.configureTestApplication() {
-        val walletDAO = WalletDAOSpecImpl(dsl)
-        val policyDAO = PolicyDAOSpecImpl(dsl)
+        val outboxGateway = OutboxGatewayImpl(dsl)
+        val walletDAO = WalletDAOSpecImpl(dsl, outboxGateway)
+        val policyDAO = PolicyDAOSpecImpl(dsl, outboxGateway)
         val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO)
         val createPolicyUseCase = CreatePolicyUseCaseImpl(policyDAO)
         val listPoliciesUseCase = ListPoliciesUseCaseImpl(policyDAO)
@@ -433,14 +436,16 @@ class PolicyIntegrationTest {
     }
 
     private fun createWallet(ownerName: String): String {
-        val walletDAO = WalletDAOSpecImpl(dsl)
+        val outboxGateway = OutboxGatewayImpl(dsl)
+        val walletDAO = WalletDAOSpecImpl(dsl, outboxGateway)
         val useCase = CreateWalletUseCaseSpecImpl(walletDAO)
         val wallet = useCase.execute(ownerName)
         return wallet.id.toString()
     }
 
     private fun createPolicy(name: String): String {
-        val policyDAO = PolicyDAOSpecImpl(dsl)
+        val outboxGateway = OutboxGatewayImpl(dsl)
+        val policyDAO = PolicyDAOSpecImpl(dsl, outboxGateway)
         val useCase = CreatePolicyUseCaseImpl(policyDAO)
         val policy = useCase.execute(
             name = name,
@@ -455,7 +460,8 @@ class PolicyIntegrationTest {
     }
 
     private fun createTxCountPolicy(name: String, limit: Int): String {
-        val policyDAO = PolicyDAOSpecImpl(dsl)
+        val outboxGateway = OutboxGatewayImpl(dsl)
+        val policyDAO = PolicyDAOSpecImpl(dsl, outboxGateway)
         val useCase = CreatePolicyUseCaseImpl(policyDAO)
         val policy = useCase.execute(
             name = name,

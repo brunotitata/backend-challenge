@@ -5,6 +5,8 @@ import com.trace.payment.adapters.database.jooq.tables.PaymentAuditEvents.PAYMEN
 import com.trace.payment.adapters.database.jooq.tables.PaymentIdempotencyKeys.PAYMENT_IDEMPOTENCY_KEYS
 import com.trace.payment.adapters.database.jooq.tables.Payments.PAYMENTS
 import com.trace.payment.adapters.database.jooq.tables.Wallets.WALLETS
+import com.trace.payment.boundary.common.OutboxEventBO
+import com.trace.payment.boundary.database.OutboxGatewaySpec
 import com.trace.payment.boundary.database.PaymentGatewaySpec
 import com.trace.payment.boundary.database.TransactionResult
 import com.trace.payment.core.entities.Cursor
@@ -23,6 +25,7 @@ import java.util.UUID
 
 class PaymentGatewayImpl(
     private val dsl: DSLContext,
+    private val outboxGateway: OutboxGatewaySpec,
 ) : PaymentGatewaySpec {
 
     private val logger = LoggerFactory.getLogger(PaymentGatewayImpl::class.java)
@@ -149,10 +152,18 @@ class PaymentGatewayImpl(
                     .set(PAYMENT_AUDIT_EVENTS.CREATED_AT, now)
                     .execute()
 
-                logger.info("Payment rejected: walletId={}, amount={}, reason=LIMIT_EXCEEDED", walletId, amount)
+            val rejectedEvent = OutboxEventBO(
+                aggregateType = "payment",
+                aggregateId = walletId.toString(),
+                eventType = "PAYMENT_REJECTED",
+                payload = "{\"walletId\":\"$walletId\",\"policyId\":\"$policyId\",\"amount\":$amount,\"idempotencyKey\":\"$idempotencyKey\",\"reason\":\"LIMIT_EXCEEDED\"}",
+            )
+            outboxGateway.save(rejectedEvent, com.trace.payment.adapters.database.gateway.JooqTransactionContext(tx))
 
-                return@transactionResult TransactionResult.Rejected
-            }
+            logger.info("Payment rejected: walletId={}, amount={}, reason=LIMIT_EXCEEDED", walletId, amount)
+
+            return@transactionResult TransactionResult.Rejected
+        }
 
             val paymentRecord = tx
                 .insertInto(PAYMENTS)
@@ -211,11 +222,20 @@ class PaymentGatewayImpl(
                 .set(PAYMENT_AUDIT_EVENTS.CREATED_AT, now)
                 .execute()
 
-            logger.info("Payment approved: walletId={}, paymentId={}, amount={}", walletId, paymentRecord.get(PAYMENTS.ID), amount)
+            val paymentId = paymentRecord.get(PAYMENTS.ID)
+            val approvedEvent = OutboxEventBO(
+                aggregateType = "payment",
+                aggregateId = paymentId.toString(),
+                eventType = "PAYMENT_APPROVED",
+                payload = """{"id":"$paymentId","walletId":"$walletId","policyId":"$policyId","amount":$amount,"status":"APPROVED","occurredAt":"$occurredAt"}""",
+            )
+            outboxGateway.save(approvedEvent, com.trace.payment.adapters.database.gateway.JooqTransactionContext(tx))
+
+            logger.info("Payment approved: walletId={}, paymentId={}, amount={}", walletId, paymentId, amount)
 
             TransactionResult.Approved(
                 PaymentEntity(
-                    id = paymentRecord.get(PAYMENTS.ID),
+                    id = paymentId,
                     walletId = paymentRecord.get(PAYMENTS.WALLET_ID),
                     policyId = paymentRecord.get(PAYMENTS.POLICY_ID),
                     amount = paymentRecord.get(PAYMENTS.AMOUNT),

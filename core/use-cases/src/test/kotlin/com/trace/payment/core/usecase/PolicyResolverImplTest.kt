@@ -34,7 +34,7 @@ class PolicyResolverImplTest {
             override fun findAll(): List<PolicyEntity> = emptyList()
             override fun findByWalletId(walletId: UUID): List<PolicyEntity> = emptyList()
             override fun findById(policyId: UUID): PolicyEntity? = null
-            override fun findActiveByWalletId(id: UUID): PolicyEntity? = policy
+            override fun findActiveByWalletId(walletId: UUID): PolicyEntity? = policy
             override fun assignPolicy(walletId: UUID, policyId: UUID) {}
         }
         return PolicyResolverImpl(policyDAO)

@@ -53,14 +53,14 @@ class ListWalletPoliciesUseCaseImplTest {
         val walletDAO = object : WalletDAOSpec {
             override fun save(wallet: com.trace.payment.core.entities.WalletEntity) = wallet
             override fun findActivePolicyName(walletId: UUID): String? = null
-            override fun existsById(id: UUID): Boolean = walletExists
+            override fun existsById(walletId: UUID): Boolean = walletExists
         }
 
         val policyDAO = object : PolicyDAOSpec {
             override fun save(policy: PolicyEntity): PolicyEntity = policy
             override fun findAll(): List<PolicyEntity> = emptyList()
-            override fun findByWalletId(id: UUID): List<PolicyEntity> = walletPolicies
-            override fun findById(id: UUID): PolicyEntity? = null
+            override fun findByWalletId(walletId: UUID): List<PolicyEntity> = walletPolicies
+            override fun findById(policyId: UUID): PolicyEntity? = null
             override fun findActiveByWalletId(walletId: UUID): PolicyEntity? = null
             override fun assignPolicy(walletId: UUID, policyId: UUID) {}
         }

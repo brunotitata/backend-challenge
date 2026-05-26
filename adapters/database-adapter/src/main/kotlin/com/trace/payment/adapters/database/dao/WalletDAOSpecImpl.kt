@@ -3,6 +3,8 @@ package com.trace.payment.adapters.database.dao
 import com.trace.payment.adapters.database.jooq.tables.Policies.POLICIES
 import com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES
 import com.trace.payment.adapters.database.jooq.tables.Wallets.WALLETS
+import com.trace.payment.boundary.common.OutboxEventBO
+import com.trace.payment.boundary.database.OutboxGatewaySpec
 import com.trace.payment.boundary.database.WalletDAOSpec
 import com.trace.payment.core.entities.WalletEntity
 import org.jooq.DSLContext
@@ -13,6 +15,7 @@ import java.util.UUID
 
 class WalletDAOSpecImpl(
     private val dsl: DSLContext,
+    private val outboxGateway: OutboxGatewaySpec,
 ) : WalletDAOSpec {
 
     override fun save(wallet: WalletEntity): WalletEntity {
@@ -21,6 +24,13 @@ class WalletDAOSpecImpl(
             ensureDefaultPolicy(tx)
             val savedWallet = insertWallet(tx, wallet)
             insertDefaultActivePolicy(tx, savedWallet.id)
+            val event = OutboxEventBO(
+                aggregateType = "wallet",
+                aggregateId = savedWallet.id.toString(),
+                eventType = "WALLET_CREATED",
+                payload = """{"id":"${savedWallet.id}","ownerName":"${savedWallet.ownerName}"}""",
+            )
+            outboxGateway.save(event, com.trace.payment.adapters.database.gateway.JooqTransactionContext(tx))
             savedWallet
         }
     }

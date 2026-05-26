@@ -3,6 +3,8 @@ package com.trace.payment.adapters.database.dao
 import com.trace.payment.adapters.database.jooq.tables.Policies.POLICIES
 import com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES
 import com.trace.payment.adapters.database.jooq.tables.Wallets.WALLETS
+import com.trace.payment.boundary.common.OutboxEventBO
+import com.trace.payment.boundary.database.OutboxGatewaySpec
 import com.trace.payment.boundary.database.PolicyDAOSpec
 import com.trace.payment.core.entities.PolicyEntity
 import org.jooq.DSLContext
@@ -13,25 +15,49 @@ import java.util.UUID
 
 class PolicyDAOSpecImpl(
     private val dsl: DSLContext,
+    private val outboxGateway: OutboxGatewaySpec,
 ) : PolicyDAOSpec {
 
     override fun save(policy: PolicyEntity): PolicyEntity {
-        val record = dsl
-            .insertInto(POLICIES)
-            .set(POLICIES.ID, policy.id)
-            .set(POLICIES.NAME, policy.name)
-            .set(POLICIES.CATEGORY, policy.category)
-            .set(POLICIES.MAX_PER_PAYMENT, policy.maxPerPayment)
-            .set(POLICIES.DAYTIME_DAILY_LIMIT, policy.daytimeDailyLimit)
-            .set(POLICIES.NIGHTTIME_DAILY_LIMIT, policy.nighttimeDailyLimit)
-            .set(POLICIES.WEEKEND_DAILY_LIMIT, policy.weekendDailyLimit)
-            .set(POLICIES.DAILY_TRANSACTION_LIMIT, policy.dailyTransactionLimit)
-            .set(POLICIES.CREATED_AT, policy.createdAt.atOffset(ZoneOffset.UTC))
-            .set(POLICIES.UPDATED_AT, policy.updatedAt.atOffset(ZoneOffset.UTC))
-            .returning()
-            .fetchOne() ?: error("Policy insert did not return a row")
+        return dsl.transactionResult { configuration ->
+            val tx = DSL.using(configuration)
+            val record = tx
+                .insertInto(POLICIES)
+                .set(POLICIES.ID, policy.id)
+                .set(POLICIES.NAME, policy.name)
+                .set(POLICIES.CATEGORY, policy.category)
+                .set(POLICIES.MAX_PER_PAYMENT, policy.maxPerPayment)
+                .set(POLICIES.DAYTIME_DAILY_LIMIT, policy.daytimeDailyLimit)
+                .set(POLICIES.NIGHTTIME_DAILY_LIMIT, policy.nighttimeDailyLimit)
+                .set(POLICIES.WEEKEND_DAILY_LIMIT, policy.weekendDailyLimit)
+                .set(POLICIES.DAILY_TRANSACTION_LIMIT, policy.dailyTransactionLimit)
+                .set(POLICIES.CREATED_AT, policy.createdAt.atOffset(ZoneOffset.UTC))
+                .set(POLICIES.UPDATED_AT, policy.updatedAt.atOffset(ZoneOffset.UTC))
+                .returning()
+                .fetchOne() ?: error("Policy insert did not return a row")
 
-        return mapToPolicyEntity(record)
+            val payload = buildString {
+                append("{")
+                append("\"id\":\"${policy.id}\",")
+                append("\"name\":\"${policy.name}\",")
+                append("\"category\":\"${policy.category}\"")
+                policy.maxPerPayment?.let { append(",\"maxPerPayment\":\"$it\"") }
+                policy.daytimeDailyLimit?.let { append(",\"daytimeDailyLimit\":\"$it\"") }
+                policy.nighttimeDailyLimit?.let { append(",\"nighttimeDailyLimit\":\"$it\"") }
+                policy.weekendDailyLimit?.let { append(",\"weekendDailyLimit\":\"$it\"") }
+                policy.dailyTransactionLimit?.let { append(",\"dailyTransactionLimit\":$it") }
+                append("}")
+            }
+            val event = OutboxEventBO(
+                aggregateType = "policy",
+                aggregateId = policy.id.toString(),
+                eventType = "POLICY_CREATED",
+                payload = payload,
+            )
+            outboxGateway.save(event, com.trace.payment.adapters.database.gateway.JooqTransactionContext(tx))
+
+            mapToPolicyEntity(record)
+        }
     }
 
     override fun findAll(): List<PolicyEntity> {
@@ -89,6 +115,14 @@ class PolicyDAOSpecImpl(
                 .set(WALLET_POLICIES.POLICY_ID, policyId)
                 .set(WALLET_POLICIES.ACTIVE, true)
                 .execute()
+
+            val event = OutboxEventBO(
+                aggregateType = "wallet_policy",
+                aggregateId = walletId.toString(),
+                eventType = "POLICY_ASSIGNED",
+                payload = "{\"walletId\":\"$walletId\",\"policyId\":\"$policyId\"}",
+            )
+            outboxGateway.save(event, com.trace.payment.adapters.database.gateway.JooqTransactionContext(tx))
         }
     }
 

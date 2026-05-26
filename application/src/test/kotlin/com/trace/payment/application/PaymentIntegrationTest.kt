@@ -4,6 +4,7 @@ import com.trace.payment.adapters.database.config.DatabaseFactory
 import com.trace.payment.adapters.database.config.JooqFactory
 import com.trace.payment.adapters.database.dao.PolicyDAOSpecImpl
 import com.trace.payment.adapters.database.dao.WalletDAOSpecImpl
+import com.trace.payment.adapters.database.gateway.OutboxGatewayImpl
 import com.trace.payment.adapters.database.gateway.PaymentGatewayImpl
 import com.trace.payment.adapters.web.configs.configureErrorHandling
 import com.trace.payment.adapters.web.configs.configureSerialization
@@ -1313,14 +1314,16 @@ class PaymentIntegrationTest {
     }
 
     private fun createWallet(ownerName: String): String {
-        val walletDAO = WalletDAOSpecImpl(dsl)
+        val outboxGateway = OutboxGatewayImpl(dsl)
+        val walletDAO = WalletDAOSpecImpl(dsl, outboxGateway)
         val useCase = CreateWalletUseCaseSpecImpl(walletDAO)
         val wallet = useCase.execute(ownerName)
         return wallet.id.toString()
     }
 
     private fun createTxCountPolicy(name: String, limit: Int): String {
-        val policyDAO = PolicyDAOSpecImpl(dsl)
+        val outboxGateway = OutboxGatewayImpl(dsl)
+        val policyDAO = PolicyDAOSpecImpl(dsl, outboxGateway)
         val useCase = CreatePolicyUseCaseImpl(policyDAO)
         val policy = useCase.execute(
             name = name,
@@ -1335,8 +1338,9 @@ class PaymentIntegrationTest {
     }
 
     private fun assignPolicy(walletId: String, policyId: String) {
-        val policyDAO = PolicyDAOSpecImpl(dsl)
-        val walletDAO = WalletDAOSpecImpl(dsl)
+        val outboxGateway = OutboxGatewayImpl(dsl)
+        val policyDAO = PolicyDAOSpecImpl(dsl, outboxGateway)
+        val walletDAO = WalletDAOSpecImpl(dsl, outboxGateway)
         val useCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO)
         useCase.execute(UUID.fromString(walletId), UUID.fromString(policyId))
     }
@@ -1380,9 +1384,10 @@ class PaymentIntegrationTest {
 }
 
 private fun Application.configureApplication(dsl: DSLContext) {
-    val walletDAO = WalletDAOSpecImpl(dsl)
-    val policyDAO = PolicyDAOSpecImpl(dsl)
-    val paymentGateway = PaymentGatewayImpl(dsl)
+    val outboxGateway = OutboxGatewayImpl(dsl)
+    val walletDAO = WalletDAOSpecImpl(dsl, outboxGateway)
+    val policyDAO = PolicyDAOSpecImpl(dsl, outboxGateway)
+    val paymentGateway = PaymentGatewayImpl(dsl, outboxGateway)
 
     val policyResolver = PolicyResolverImpl(policyDAO)
     val policyRegistry = PolicyEvaluatorRegistryImpl().apply {
