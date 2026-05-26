@@ -6,6 +6,8 @@ import com.trace.payment.adapters.web.dtos.DataResponseDTO
 import com.trace.payment.adapters.web.dtos.ListPaymentResponseDTO
 import com.trace.payment.adapters.web.dtos.MetaDTO
 import com.trace.payment.adapters.web.configs.RequestIdKey
+import com.trace.payment.adapters.web.configs.PaymentMetrics
+import com.trace.payment.boundary.exceptions.UnprocessableEntityException
 import com.trace.payment.boundary.input.ListPaymentsUseCaseSpec
 import com.trace.payment.boundary.input.ProcessPaymentUseCaseSpec
 import io.github.smiley4.ktorswaggerui.dsl.get
@@ -79,7 +81,13 @@ fun Application.configurePaymentRoutes(
             val occurredAtStr = request.occurredAt ?: throw BadRequestException("occurredAt is required")
             val occurredAt = Instant.parse(occurredAtStr)
 
-            val payment = processPaymentUseCase.execute(walletId, amount, occurredAt, idempotencyKey)
+            val payment = try {
+                processPaymentUseCase.execute(walletId, amount, occurredAt, idempotencyKey, requestId)
+            } catch (e: UnprocessableEntityException) {
+                PaymentMetrics.recordRejected()
+                throw e
+            }
+            PaymentMetrics.recordApproved()
 
             call.respond(
                 HttpStatusCode.Created,

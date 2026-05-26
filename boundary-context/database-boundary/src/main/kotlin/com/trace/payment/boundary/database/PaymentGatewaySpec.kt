@@ -17,6 +17,7 @@ interface PaymentGatewaySpec {
         periodStart: Instant,
         idempotencyKey: String,
         requestHash: String,
+        requestId: String?,
         checkLimit: (consumedAmount: BigDecimal, transactionCount: Int) -> Boolean,
     ): TransactionResult
 

@@ -27,6 +27,7 @@ dependencies {
     implementation("io.ktor:ktor-server-status-pages:$ktorVersion")
     implementation("io.github.smiley4:ktor-swagger-ui:2.10.0")
     implementation("ch.qos.logback:logback-classic:1.4.14")
+    implementation("net.logstash.logback:logstash-logback-encoder:7.4")
 
     testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
     testImplementation("org.testcontainers:postgresql:$testcontainersVersion")

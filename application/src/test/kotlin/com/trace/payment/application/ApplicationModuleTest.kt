@@ -1,6 +1,8 @@
 package com.trace.payment.application
 
 import com.trace.payment.adapters.web.configs.configureErrorHandling
+import com.trace.payment.adapters.web.configs.configureMetrics
+import com.trace.payment.adapters.web.configs.configureRequestId
 import com.trace.payment.adapters.web.configs.configureSerialization
 import com.trace.payment.adapters.web.routes.configureHealthRoutes
 import com.trace.payment.boundary.exceptions.ValidationException
@@ -11,6 +13,7 @@ import io.ktor.server.routing.*
 import io.ktor.server.testing.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class ApplicationModuleTest {
     @Test
@@ -23,6 +26,31 @@ class ApplicationModuleTest {
         val response = client.get("/health")
         assertEquals(HttpStatusCode.OK, response.status)
         assertEquals("""{"status":"OK"}""", response.bodyAsText())
+    }
+
+    @Test
+    fun `request id header is echoed in responses`() = testApplication {
+        application {
+            configureSerialization()
+            configureErrorHandling()
+            configureRequestId()
+            configureHealthRoutes()
+        }
+        val response = client.get("/health") {
+            header("X-Request-Id", "req-test-123")
+        }
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals("req-test-123", response.headers["X-Request-Id"])
+    }
+
+    @Test
+    fun `GET metrics exposes prometheus text`() = testApplication {
+        application {
+            configureMetrics()
+        }
+        val response = client.get("/metrics")
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(response.bodyAsText().contains("payments_processed_total"))
     }
 
     @Test

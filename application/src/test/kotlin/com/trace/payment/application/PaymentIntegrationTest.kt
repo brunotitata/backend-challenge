@@ -31,6 +31,7 @@ import io.ktor.server.application.*
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.testing.*
+import org.junit.jupiter.api.AfterEach
 import org.jooq.DSLContext
 import org.jooq.exception.DataAccessException
 import org.junit.jupiter.api.BeforeEach
@@ -74,6 +75,11 @@ class PaymentIntegrationTest {
                 statement.execute("TRUNCATE TABLE wallet_policies, payment_idempotency_keys, payments, limit_consumptions, policies, wallets RESTART IDENTITY CASCADE")
             }
         }
+    }
+
+    @AfterEach
+    fun tearDown() {
+        (dataSource as? AutoCloseable)?.close()
     }
 
     @Test
@@ -170,6 +176,38 @@ class PaymentIntegrationTest {
         val response = client.post("/wallets/$walletId/payments") {
             contentType(ContentType.Application.Json)
             header("Idempotency-Key", "negative-amount-test")
+            setBody(body)
+        }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `POST payments with more than two decimal places returns 400`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        val body = """{"amount":1.001,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""
+
+        val response = client.post("/wallets/$walletId/payments") {
+            contentType(ContentType.Application.Json)
+            header("Idempotency-Key", "too-many-decimals")
+            setBody(body)
+        }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `POST payments with amount exceeding database precision returns 400`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        val body = """{"amount":999999999999999999.99,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""
+
+        val response = client.post("/wallets/$walletId/payments") {
+            contentType(ContentType.Application.Json)
+            header("Idempotency-Key", "too-large-amount")
             setBody(body)
         }
 
@@ -901,6 +939,7 @@ class PaymentIntegrationTest {
         assertTrue(body.contains(""""amount":"200.00""""))
         assertTrue(!body.contains(""""amount":"100.00""""))
         assertTrue(!body.contains(""""amount":"300.00""""))
+        assertTrue(body.contains(""""total":1"""))
     }
 
     @Test
@@ -1311,6 +1350,7 @@ class PaymentIntegrationTest {
             private set
 
         private var server: ApplicationEngine? = null
+        private var serverDataSource: DataSource? = null
 
         @BeforeAll
         @JvmStatic
@@ -1322,6 +1362,7 @@ class PaymentIntegrationTest {
                     password = postgres.password,
                 ),
             )
+            serverDataSource = dataSource
             val dsl = JooqFactory.create(dataSource)
             port = java.net.ServerSocket(0).use { it.localPort }
             server = embeddedServer(Netty, port = port) {
@@ -1333,6 +1374,7 @@ class PaymentIntegrationTest {
         @JvmStatic
         fun stopServer() {
             server?.stop(1000, 2000)
+            (serverDataSource as? AutoCloseable)?.close()
         }
     }
 }

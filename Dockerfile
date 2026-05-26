@@ -1,8 +1,8 @@
 # Build stage
-FROM gradle:8.5-jdk21-alpine AS build
+FROM gradle:8.14-jdk21-alpine AS build
 WORKDIR /app
 COPY . .
-RUN gradle :application:installDist --no-daemon
+RUN ./gradlew :application:installDist --no-daemon
 
 # Runtime stage
 FROM eclipse-temurin:21-jre-alpine

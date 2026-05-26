@@ -170,7 +170,7 @@ paths:
               type: object
               properties:
                 amount:
-                  type: number
+                  $ref: '#/components/schemas/MoneyInput'
                 occurredAt:
                   type: string
                   format: date-time
@@ -191,7 +191,7 @@ paths:
                   status:
                     type: string
                   amount:
-                    type: number
+                    $ref: '#/components/schemas/Money'
                   occurredAt:
                     type: string
                     format: date-time
@@ -242,6 +242,17 @@ paths:
                     $ref: '#/components/schemas/Meta'
 components:
   schemas:
+    Money:
+      type: string
+      pattern: '^\d{1,17}(\.\d{1,2})?$'
+      example: "999.99"
+      description: Decimal monetary value serialized as a string to preserve precision.
+    MoneyInput:
+      oneOf:
+        - $ref: '#/components/schemas/Money'
+        - type: number
+          format: double
+      description: Requests accept JSON number or decimal string; values must fit NUMERIC(19,2).
     Policy:
       type: object
       properties:
@@ -253,13 +264,13 @@ components:
         category:
           type: string
         maxPerPayment:
-          type: number
+          $ref: '#/components/schemas/Money'
         daytimeDailyLimit:
-          type: number
+          $ref: '#/components/schemas/Money'
         nighttimeDailyLimit:
-          type: number
+          $ref: '#/components/schemas/Money'
         weekendDailyLimit:
-          type: number
+          $ref: '#/components/schemas/Money'
         dailyTransactionLimit:
           type: integer
         createdAt:
@@ -276,13 +287,13 @@ components:
         category:
           type: string
         maxPerPayment:
-          type: number
+          $ref: '#/components/schemas/MoneyInput'
         daytimeDailyLimit:
-          type: number
+          $ref: '#/components/schemas/MoneyInput'
         nighttimeDailyLimit:
-          type: number
+          $ref: '#/components/schemas/MoneyInput'
         weekendDailyLimit:
-          type: number
+          $ref: '#/components/schemas/MoneyInput'
         dailyTransactionLimit:
           type: integer
       required:
@@ -298,7 +309,7 @@ components:
           type: string
           format: uuid
         amount:
-          type: number
+          $ref: '#/components/schemas/Money'
         occurredAt:
           type: string
           format: date-time

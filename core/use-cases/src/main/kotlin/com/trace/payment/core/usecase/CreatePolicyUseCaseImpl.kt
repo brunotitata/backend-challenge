@@ -55,6 +55,7 @@ class CreatePolicyUseCaseImpl(
 
     private fun requirePositive(field: String, value: BigDecimal?) {
         if (value == null) throw ValidationException("$field is required for VALUE_LIMIT")
+        MoneyValidator.requireValid(field, value)
         if (value <= BigDecimal.ZERO) throw ValidationException("$field must be greater than zero")
     }
 }

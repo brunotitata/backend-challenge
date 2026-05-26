@@ -4,6 +4,7 @@ import com.trace.payment.adapters.database.jooq.tables.LimitConsumptions.LIMIT_C
 import com.trace.payment.adapters.database.jooq.tables.PaymentAuditEvents.PAYMENT_AUDIT_EVENTS
 import com.trace.payment.adapters.database.jooq.tables.PaymentIdempotencyKeys.PAYMENT_IDEMPOTENCY_KEYS
 import com.trace.payment.adapters.database.jooq.tables.Payments.PAYMENTS
+import com.trace.payment.adapters.database.jooq.tables.Wallets.WALLETS
 import com.trace.payment.boundary.database.PaymentGatewaySpec
 import com.trace.payment.boundary.database.TransactionResult
 import com.trace.payment.core.entities.Cursor
@@ -35,11 +36,18 @@ class PaymentGatewayImpl(
         periodStart: Instant,
         idempotencyKey: String,
         requestHash: String,
+        requestId: String?,
         checkLimit: (consumedAmount: BigDecimal, transactionCount: Int) -> Boolean,
     ): TransactionResult {
         return dsl.transactionResult { configuration ->
             val tx = DSL.using(configuration)
             val now = OffsetDateTime.now()
+
+            tx.selectOne()
+                .from(WALLETS)
+                .where(WALLETS.ID.eq(walletId))
+                .forUpdate()
+                .fetchOne()
 
             val idempotencyInserted = tx.insertInto(
                 PAYMENT_IDEMPOTENCY_KEYS,
@@ -130,6 +138,10 @@ class PaymentGatewayImpl(
 
                 tx.insertInto(PAYMENT_AUDIT_EVENTS)
                     .set(PAYMENT_AUDIT_EVENTS.WALLET_ID, walletId)
+                    .set(PAYMENT_AUDIT_EVENTS.PAYMENT_ID, null as UUID?)
+                    .set(PAYMENT_AUDIT_EVENTS.POLICY_ID, policyId)
+                    .set(PAYMENT_AUDIT_EVENTS.IDEMPOTENCY_KEY, idempotencyKey)
+                    .set(PAYMENT_AUDIT_EVENTS.REQUEST_ID, requestId)
                     .set(PAYMENT_AUDIT_EVENTS.AMOUNT, amount)
                     .set(PAYMENT_AUDIT_EVENTS.STATUS, "REJECTED")
                     .set(PAYMENT_AUDIT_EVENTS.REASON, "LIMIT_EXCEEDED")
@@ -188,6 +200,10 @@ class PaymentGatewayImpl(
 
             tx.insertInto(PAYMENT_AUDIT_EVENTS)
                 .set(PAYMENT_AUDIT_EVENTS.WALLET_ID, walletId)
+                .set(PAYMENT_AUDIT_EVENTS.PAYMENT_ID, paymentRecord.get(PAYMENTS.ID))
+                .set(PAYMENT_AUDIT_EVENTS.POLICY_ID, policyId)
+                .set(PAYMENT_AUDIT_EVENTS.IDEMPOTENCY_KEY, idempotencyKey)
+                .set(PAYMENT_AUDIT_EVENTS.REQUEST_ID, requestId)
                 .set(PAYMENT_AUDIT_EVENTS.AMOUNT, amount)
                 .set(PAYMENT_AUDIT_EVENTS.STATUS, "APPROVED")
                 .set(PAYMENT_AUDIT_EVENTS.REASON, null as String?)
@@ -241,18 +257,19 @@ class PaymentGatewayImpl(
         cursor: String?,
         limit: Int,
     ): PaginationResult<PaymentEntity> {
-        val conditions = mutableListOf<Condition>(
+        val baseConditions = mutableListOf<Condition>(
             PAYMENTS.WALLET_ID.eq(walletId),
             PAYMENTS.STATUS.eq("APPROVED"),
         )
 
         if (startDate != null) {
-            conditions.add(PAYMENTS.OCCURRED_AT.ge(startDate.atOffset(ZoneOffset.UTC)))
+            baseConditions.add(PAYMENTS.OCCURRED_AT.ge(startDate.atOffset(ZoneOffset.UTC)))
         }
         if (endDate != null) {
-            conditions.add(PAYMENTS.OCCURRED_AT.le(endDate.atOffset(ZoneOffset.UTC)))
+            baseConditions.add(PAYMENTS.OCCURRED_AT.le(endDate.atOffset(ZoneOffset.UTC)))
         }
 
+        val conditions = baseConditions.toMutableList()
         val parsedCursor = cursor?.let { Cursor.decode(it) }
 
         if (parsedCursor != null) {
@@ -331,8 +348,7 @@ class PaymentGatewayImpl(
         val total = dsl
             .selectCount()
             .from(PAYMENTS)
-            .where(PAYMENTS.WALLET_ID.eq(walletId))
-            .and(PAYMENTS.STATUS.eq("APPROVED"))
+            .where(baseConditions)
             .fetchOne { it.get(0) as Int }
             ?: 0
 

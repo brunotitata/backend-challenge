@@ -96,12 +96,10 @@ class WalletDAOSpecImpl(
                     DSL.`val`(BigDecimal("4000.00")),
                     DSL.`val`(BigDecimal("1000.00")),
                     DSL.`val`(BigDecimal("1000.00")),
-                ).whereNotExists(
-                    tx.selectOne()
-                        .from(POLICIES)
-                        .where(POLICIES.NAME.eq("DEFAULT_VALUE_LIMIT")),
                 ),
             )
+            .onConflict(POLICIES.NAME)
+            .doNothing()
             .execute()
     }
 }

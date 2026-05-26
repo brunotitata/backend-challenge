@@ -13,6 +13,7 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.testing.*
+import org.junit.jupiter.api.AfterEach
 import org.jooq.DSLContext
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -47,6 +48,11 @@ class WalletIntegrationTest {
                 statement.execute("TRUNCATE TABLE wallet_policies, wallets RESTART IDENTITY CASCADE")
             }
         }
+    }
+
+    @AfterEach
+    fun tearDown() {
+        (dataSource as? AutoCloseable)?.close()
     }
 
     @Test

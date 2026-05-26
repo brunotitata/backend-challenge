@@ -265,7 +265,7 @@ curl -X POST http://localhost:8080/wallets/550e8400-e29b-41d4-a716-446655440000/
 {
   "paymentId": "550e8400-e29b-41d4-a716-446655440002",
   "status": "APPROVED",
-  "amount": 999.99,
+  "amount": "999.99",
   "occurredAt": "2024-08-26T09:42:17.2500Z"
 }
 ```
@@ -306,7 +306,7 @@ curl "http://localhost:8080/wallets/550e8400-e29b-41d4-a716-446655440000/payment
     {
       "id": "550e8400-e29b-41d4-a716-446655440002",
       "walletId": "550e8400-e29b-41d4-a716-446655440000",
-      "amount": 999.99,
+      "amount": "999.99",
       "occurredAt": "2024-08-26T09:42:17.2500Z",
       "status": "APPROVED",
       "createdAt": "2024-08-26T09:42:17.3500Z",
@@ -373,6 +373,8 @@ O processamento de pagamento ocorre dentro de uma **transação SQL atômica**:
 
 A tabela `limit_consumptions` possui índice único por `(wallet_id, policy_id, period_type, period_start)`, garantindo que não haja linhas duplicadas para o mesmo período. Em PostgreSQL, operações de `INSERT ... ON CONFLICT` (UPSERT) garantem atomicidade mesmo sob concorrência.
 
+Pagamentos e troca de política ativa serializam por carteira usando lock na linha de `wallets`. O pagamento persiste o `policy_id` usado na decisão, mantendo uma semântica de snapshot auditável mesmo que a política ativa seja trocada por uma requisição concorrente.
+
 ---
 
 ## Decisão de Timezone
@@ -389,9 +391,9 @@ A tabela `limit_consumptions` possui índice único por `(wallet_id, policy_id, 
 
 ## Decisão de Precisão Monetária
 
-- Valores monetários usam `BigDecimal` no domínio.
+- Valores monetários usam `BigDecimal` no domínio e são serializados como string decimal nas respostas para preservar precisão.
 - O banco armazena como `NUMERIC(19, 2)`.
-- A API rejeita valores negativos, zero, nulos, ausentes ou com precisão inválida.
+- A API aceita números JSON ou strings decimais nas requisições e rejeita valores negativos, zero, nulos, ausentes, com mais de 2 casas decimais ou fora de `NUMERIC(19,2)`.
 - A regra de comparação de limite é **inclusiva**: valores iguais ao limite permitido são aceitos.
 
 ---
@@ -427,8 +429,8 @@ Trade-off: há curva de aprendizado inicial e configuração extra no build (plu
 
 1. **Wiring manual em `Application.kt`**: não usamos framework de DI (Koin, Spring). Isso reduz dependências e magicas, mas aumenta o código boilerplate de wiring. Em escala maior, um DI container seria recomendado.
 2. **Timezone fixo (`America/Sao_Paulo`)**: a classificação de período está hardcoded para o timezone brasileiro. Para multi-região, o timezone deveria vir da carteira ou do request.
-3. **Paginação por cursor simples**: o cursor é base64 de um JSON com `occurredAt` e `id`. Não inclui criptografia ou assinatura. Para produção, considerar cursor opaco com HMAC.
-4. **Métricas apenas em logs**: não há sistema de métricas externo (Prometheus, etc.). Os contadores de pagamentos são emitidos como logs estruturados.
+3. **Paginação por cursor simples**: o cursor é base64 URL-safe de `direction|occurredAt|id`. Não inclui criptografia ou assinatura. Para produção, considerar cursor opaco com HMAC.
+4. **Métricas Prometheus básicas**: `/metrics` expõe contador de pagamentos aprovados/rejeitados. Para produção, ampliar com latência, saturação de pool, erros por endpoint e métricas de banco.
 5. **Auditoria em tabela separada**: eventos de auditoria são persistidos em `payment_audit_events`. Em alta escala, considerar arquivamento periódico.
 
 ---

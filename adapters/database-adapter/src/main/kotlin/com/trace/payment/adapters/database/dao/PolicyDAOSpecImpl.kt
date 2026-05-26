@@ -2,6 +2,7 @@ package com.trace.payment.adapters.database.dao
 
 import com.trace.payment.adapters.database.jooq.tables.Policies.POLICIES
 import com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES
+import com.trace.payment.adapters.database.jooq.tables.Wallets.WALLETS
 import com.trace.payment.boundary.database.PolicyDAOSpec
 import com.trace.payment.core.entities.PolicyEntity
 import org.jooq.DSLContext
@@ -70,6 +71,12 @@ class PolicyDAOSpecImpl(
     override fun assignPolicy(walletId: UUID, policyId: UUID) {
         dsl.transaction { configuration ->
             val tx = DSL.using(configuration)
+
+            tx.selectOne()
+                .from(WALLETS)
+                .where(WALLETS.ID.eq(walletId))
+                .forUpdate()
+                .fetchOne()
 
             tx.update(WALLET_POLICIES)
                 .set(WALLET_POLICIES.ACTIVE, false)

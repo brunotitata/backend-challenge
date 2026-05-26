@@ -6,6 +6,7 @@ import com.trace.payment.adapters.database.dao.PolicyDAOSpecImpl
 import com.trace.payment.adapters.database.dao.WalletDAOSpecImpl
 import com.trace.payment.adapters.database.gateway.PaymentGatewayImpl
 import com.trace.payment.adapters.web.configs.configureErrorHandling
+import com.trace.payment.adapters.web.configs.configureMetrics
 import com.trace.payment.adapters.web.configs.configureRequestId
 import com.trace.payment.adapters.web.configs.configureSerialization
 import com.trace.payment.adapters.web.configs.configureSwagger
@@ -31,6 +32,9 @@ import io.ktor.server.application.*
 fun main() {
     embeddedServer(Netty, port = System.getenv("PORT")?.toIntOrNull() ?: 8080) {
         val dataSource = DatabaseFactory.createFromEnv()
+        environment.monitor.subscribe(ApplicationStopped) {
+            (dataSource as? AutoCloseable)?.close()
+        }
         val dsl = JooqFactory.create(dataSource)
 
         val walletDAO = WalletDAOSpecImpl(dsl)
@@ -54,6 +58,7 @@ fun main() {
         configureSerialization()
         configureErrorHandling()
         configureRequestId()
+        configureMetrics()
         configureSwagger()
         configureHealthRoutes()
         configureWalletRoutes(createWalletUseCase)

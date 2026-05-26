@@ -20,6 +20,7 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.testing.*
+import org.junit.jupiter.api.AfterEach
 import org.jooq.DSLContext
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -60,6 +61,11 @@ class PolicyIntegrationTest {
                 statement.execute("TRUNCATE TABLE wallet_policies, policies, wallets RESTART IDENTITY CASCADE")
             }
         }
+    }
+
+    @AfterEach
+    fun tearDown() {
+        (dataSource as? AutoCloseable)?.close()
     }
 
     @Test
@@ -142,6 +148,18 @@ class PolicyIntegrationTest {
         val response = client.post("/policies") {
             contentType(ContentType.Application.Json)
             setBody("""{"name":"TEST","category":"VALUE_LIMIT","maxPerPayment":"-100","daytimeDailyLimit":"2000.00","nighttimeDailyLimit":"500.00","weekendDailyLimit":"500.00"}""")
+        }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `POST policies with amount scale above two decimals returns 400`() = testApplication {
+        application { configureTestApplication() }
+
+        val response = client.post("/policies") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"name":"TEST","category":"VALUE_LIMIT","maxPerPayment":"1000.001","daytimeDailyLimit":"2000.00","nighttimeDailyLimit":"500.00","weekendDailyLimit":"500.00"}""")
         }
 
         assertEquals(HttpStatusCode.BadRequest, response.status)

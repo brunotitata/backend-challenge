@@ -3,6 +3,7 @@ package com.trace.payment.adapters.web.configs
 import io.ktor.server.application.*
 import io.ktor.server.plugins.*
 import io.ktor.util.*
+import org.slf4j.MDC
 import java.util.UUID
 
 val RequestIdKey = AttributeKey<String>("RequestId")
@@ -12,6 +13,11 @@ fun Application.configureRequestId() {
         onCall { call ->
             val requestId = call.request.headers["X-Request-Id"] ?: UUID.randomUUID().toString()
             call.attributes.put(RequestIdKey, requestId)
+            call.response.headers.append("X-Request-Id", requestId)
+            MDC.put("requestId", requestId)
+        }
+        onCallRespond { _, _ ->
+            MDC.remove("requestId")
         }
     })
 }

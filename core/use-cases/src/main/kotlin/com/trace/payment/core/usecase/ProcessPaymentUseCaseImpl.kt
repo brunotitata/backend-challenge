@@ -27,7 +27,15 @@ class ProcessPaymentUseCaseImpl(
 
     private val zone = ZoneId.of("America/Sao_Paulo")
 
-    override fun execute(walletId: UUID, amount: BigDecimal, occurredAt: Instant, idempotencyKey: String): PaymentEntity {
+    override fun execute(
+        walletId: UUID,
+        amount: BigDecimal,
+        occurredAt: Instant,
+        idempotencyKey: String,
+        requestId: String?,
+    ): PaymentEntity {
+        MoneyValidator.requireValid("amount", amount)
+
         if (amount <= BigDecimal.ZERO) {
             throw ValidationException("amount must be greater than zero")
         }
@@ -66,6 +74,7 @@ class ProcessPaymentUseCaseImpl(
             periodStart = limitPeriodStart,
             idempotencyKey = idempotencyKey,
             requestHash = hash,
+            requestId = requestId,
             checkLimit = { consumedAmount, transactionCount ->
                 val evaluation = evaluator.evaluate(policy, amount, consumedAmount, classification.periodType, transactionCount)
                 evaluation.approved
