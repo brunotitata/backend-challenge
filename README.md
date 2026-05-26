@@ -56,6 +56,7 @@ PostgreSQL
 | Testes | JUnit 5, Ktor TestHost, Testcontainers 1.20.4 |
 | Build | Gradle Kotlin DSL |
 | Documentação | Swagger UI (ktor-swagger-ui) |
+| Mensageria | RabbitMQ 3 (com management plugin) |
 | Container | Docker Compose |
 
 ---
@@ -75,7 +76,7 @@ PostgreSQL
    cd payment-api
    ```
 
-2. Suba as dependências (PostgreSQL):
+2. Suba as dependências (PostgreSQL + RabbitMQ):
    ```bash
    docker compose up -d
    ```
@@ -95,6 +96,26 @@ PostgreSQL
 | `DATABASE_USER` | `payment_api` | Usuário do banco |
 | `DATABASE_PASSWORD` | `payment_api` | Senha do banco |
 | `PORT` | `8080` | Porta da aplicação |
+| `RABBITMQ_HOST` | `localhost` | Host do RabbitMQ |
+| `RABBITMQ_PORT` | `5672` | Porta AMQP do RabbitMQ |
+| `RABBITMQ_USER` | `payment` | Usuário do RabbitMQ |
+| `RABBITMQ_PASS` | `payment` | Senha do RabbitMQ |
+| `RABBITMQ_EXCHANGE` | `payment.events` | Nome do exchange de eventos |
+
+---
+
+## RabbitMQ Management UI
+
+O RabbitMQ é iniciado automaticamente pelo Docker Compose com o plugin de management ativo. Para acompanhar filas, exchanges e mensagens publicadas:
+
+```
+http://localhost:15672
+```
+
+- **Usuário:** `payment`
+- **Senha:** `payment`
+
+O exchange `payment.events` é criado automaticamente pela aplicação na primeira publicação (type `topic`, durable).
 
 ---
 
@@ -395,6 +416,33 @@ Pagamentos e troca de política ativa serializam por carteira usando lock na lin
 - O banco armazena como `NUMERIC(19, 2)`.
 - A API aceita números JSON ou strings decimais nas requisições e rejeita valores negativos, zero, nulos, ausentes, com mais de 2 casas decimais ou fora de `NUMERIC(19,2)`.
 - A regra de comparação de limite é **inclusiva**: valores iguais ao limite permitido são aceitos.
+
+---
+
+## Decisão de Outbox Pattern
+
+Eventos de domínio (ex: `WALLET_CREATED`, `PAYMENT_APPROVED`) são persistidos na tabela `outbox_events` dentro da mesma transação da operação de negócio. Um scheduler assíncrono (`OutboxScheduler`) consome os registros não processados e publica no RabbitMQ.
+
+### Tabela `outbox_events`
+
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| `id` | UUID | Identificador do evento |
+| `aggregate_type` | VARCHAR(100) | Tipo do agregado (ex: `wallet`, `payment`) |
+| `aggregate_id` | VARCHAR(100) | ID do agregado |
+| `event_type` | VARCHAR(100) | Tipo do evento (ex: `WALLET_CREATED`) |
+| `payload` | JSONB | Dados do evento |
+| `created_at` | TIMESTAMPTZ | Data de criação |
+| `processed_at` | TIMESTAMPTZ | Data de processamento (quando publicado) |
+| `retry_count` | INTEGER | Número de tentativas de publicação |
+| `status` | VARCHAR(20) | `SENT` (publicado com sucesso) ou `ERROR` (falhou) |
+
+### Estados do status
+
+- **`SENT`**: o evento foi publicado com sucesso no RabbitMQ.
+- **`ERROR`**: a publicação falhou e o retry foi incrementado. O scheduler tenta novamente na próxima execução.
+
+O exchange é declarado automaticamente (`channel.exchangeDeclare`) pelo publisher antes de cada publicação, garantindo que o exchange exista mesmo que o RabbitMQ tenha sido reiniciado.
 
 ---
 
