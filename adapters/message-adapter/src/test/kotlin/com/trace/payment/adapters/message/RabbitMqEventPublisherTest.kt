@@ -24,6 +24,7 @@ class RabbitMqEventPublisherTest {
         val publisher: EventPublisherSpec = RabbitMqEventPublisher(connectionFactory)
         publisher.publish("payment.events", "wallet", "{\"id\":\"1\"}")
 
+        verify(mockChannel).exchangeDeclare("payment.events", "topic", true)
         verify(mockChannel).basicPublish("payment.events", "wallet", null, "{\"id\":\"1\"}".toByteArray(Charsets.UTF_8))
         verify(mockChannel).close()
         verify(mockConnection).close()

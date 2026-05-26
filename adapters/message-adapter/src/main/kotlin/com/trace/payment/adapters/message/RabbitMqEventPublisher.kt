@@ -13,6 +13,7 @@ class RabbitMqEventPublisher(
     override fun publish(exchange: String, routingKey: String, payload: String) {
         connectionFactory.newConnection().use { connection ->
             connection.createChannel().use { channel ->
+                channel.exchangeDeclare(exchange, "topic", true)
                 channel.basicPublish(exchange, routingKey, null, payload.toByteArray(Charsets.UTF_8))
                 logger.debug("Published event to exchange={}, routingKey={}", exchange, routingKey)
             }
