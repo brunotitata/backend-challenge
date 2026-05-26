@@ -18,6 +18,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import com.trace.payment.adapters.database.jooq.tables.OutboxEvents.OUTBOX_EVENTS
 import org.jooq.impl.DSL
 
 @Testcontainers
@@ -70,6 +71,7 @@ class OutboxGatewayImplTest {
         assertEquals("WALLET_CREATED", unprocessed[0].eventType)
         assertEquals(0, unprocessed[0].retryCount)
         assertNull(unprocessed[0].processedAt)
+        assertNull(unprocessed[0].status)
     }
 
     @Test
@@ -110,7 +112,7 @@ class OutboxGatewayImplTest {
         )
         outboxGateway.save(event1)
         outboxGateway.save(event2)
-        outboxGateway.markAsProcessed(event1.id)
+        outboxGateway.markAsSent(event1.id)
 
         val unprocessed = outboxGateway.findUnprocessed(10)
         assertEquals(1, unprocessed.size)
@@ -118,7 +120,7 @@ class OutboxGatewayImplTest {
     }
 
     @Test
-    fun `markAsProcessed sets processed_at`() {
+    fun `markAsSent sets processed_at and status`() {
         val event = OutboxEventBO(
             aggregateType = "wallet",
             aggregateId = "w1",
@@ -127,14 +129,19 @@ class OutboxGatewayImplTest {
         )
         outboxGateway.save(event)
 
-        outboxGateway.markAsProcessed(event.id)
+        outboxGateway.markAsSent(event.id)
 
         val unprocessed = outboxGateway.findUnprocessed(10)
         assertTrue(unprocessed.isEmpty())
+
+        val all = dsl.selectFrom(OUTBOX_EVENTS).fetch()
+        assertEquals(1, all.size)
+        assertEquals("SENT", all[0].status)
+        assertNotNull(all[0].processedAt)
     }
 
     @Test
-    fun `incrementRetry increases retry_count`() {
+    fun `markAsError increases retry_count and sets status`() {
         val event = OutboxEventBO(
             aggregateType = "wallet",
             aggregateId = "w1",
@@ -143,12 +150,13 @@ class OutboxGatewayImplTest {
         )
         outboxGateway.save(event)
 
-        outboxGateway.incrementRetry(event.id)
-        outboxGateway.incrementRetry(event.id)
+        outboxGateway.markAsError(event.id)
+        outboxGateway.markAsError(event.id)
 
         val unprocessed = outboxGateway.findUnprocessed(10)
         assertEquals(1, unprocessed.size)
         assertEquals(2, unprocessed[0].retryCount)
+        assertEquals("ERROR", unprocessed[0].status)
     }
 
     companion object {

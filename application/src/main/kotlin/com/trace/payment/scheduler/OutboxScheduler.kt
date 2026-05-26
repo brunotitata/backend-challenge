@@ -47,11 +47,11 @@ class OutboxScheduler(
             for (event in events) {
                 try {
                     eventPublisher.publish(exchangeName, event.aggregateType, event.payload)
-                    outboxGateway.markAsProcessed(event.id)
-                    logger.debug("Published and marked event {} as processed", event.id)
+                    outboxGateway.markAsSent(event.id)
+                    logger.debug("Published and marked event {} as sent", event.id)
                 } catch (e: Exception) {
                     logger.error("Failed to publish event {}: {}", event.id, e.message, e)
-                    outboxGateway.incrementRetry(event.id)
+                    outboxGateway.markAsError(event.id)
                 }
             }
         } catch (e: Exception) {

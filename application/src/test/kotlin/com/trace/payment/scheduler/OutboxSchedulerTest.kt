@@ -12,8 +12,8 @@ import java.time.Instant
 class OutboxSchedulerTest {
 
     private val publishedEvents = mutableListOf<Triple<String, String, String>>()
-    private val markedProcessed = mutableListOf<UUID>()
-    private val retriedEvents = mutableListOf<UUID>()
+    private val markedSent = mutableListOf<UUID>()
+    private val markedError = mutableListOf<UUID>()
 
     private val outboxGateway = object : OutboxGatewaySpec {
         private val events = mutableListOf<OutboxEventBO>()
@@ -28,16 +28,20 @@ class OutboxSchedulerTest {
             return events.filter { it.processedAt == null }.take(limit)
         }
 
-        override fun markAsProcessed(id: UUID) {
-            markedProcessed.add(id)
+        override fun markAsSent(id: UUID) {
+            markedSent.add(id)
             val idx = events.indexOfFirst { it.id == id }
             if (idx >= 0) {
-                events[idx] = events[idx].copy(processedAt = Instant.now())
+                events[idx] = events[idx].copy(processedAt = Instant.now(), status = "SENT")
             }
         }
 
-        override fun incrementRetry(id: UUID) {
-            retriedEvents.add(id)
+        override fun markAsError(id: UUID) {
+            markedError.add(id)
+            val idx = events.indexOfFirst { it.id == id }
+            if (idx >= 0) {
+                events[idx] = events[idx].copy(status = "ERROR")
+            }
         }
     }
 
@@ -85,9 +89,9 @@ class OutboxSchedulerTest {
         assertEquals("payment.events", publishedEvents[1].first)
         assertEquals("policy", publishedEvents[1].second)
 
-        assertEquals(2, markedProcessed.size)
-        assertEquals(event1.id, markedProcessed[0])
-        assertEquals(event2.id, markedProcessed[1])
+        assertEquals(2, markedSent.size)
+        assertEquals(event1.id, markedSent[0])
+        assertEquals(event2.id, markedSent[1])
     }
 
     @Test
@@ -104,9 +108,9 @@ class OutboxSchedulerTest {
         scheduler.processBatch()
 
         assertEquals(0, publishedEvents.size)
-        assertEquals(0, markedProcessed.size)
-        assertEquals(1, retriedEvents.size)
-        assertEquals(event.id, retriedEvents[0])
+        assertEquals(0, markedSent.size)
+        assertEquals(1, markedError.size)
+        assertEquals(event.id, markedError[0])
     }
 
     @Test
@@ -114,6 +118,6 @@ class OutboxSchedulerTest {
         scheduler.processBatch()
 
         assertEquals(0, publishedEvents.size)
-        assertEquals(0, markedProcessed.size)
+        assertEquals(0, markedSent.size)
     }
 }

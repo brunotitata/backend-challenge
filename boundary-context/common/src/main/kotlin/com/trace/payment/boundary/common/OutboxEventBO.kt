@@ -12,4 +12,5 @@ data class OutboxEventBO(
     val createdAt: Instant = Instant.now(),
     val processedAt: Instant? = null,
     val retryCount: Int = 0,
+    val status: String? = null,
 )

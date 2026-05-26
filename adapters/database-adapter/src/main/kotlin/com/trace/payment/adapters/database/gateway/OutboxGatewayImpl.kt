@@ -36,6 +36,7 @@ class OutboxGatewayImpl(
             .set(OUTBOX_EVENTS.CREATED_AT, event.createdAt.atOffset(ZoneOffset.UTC))
             .set(OUTBOX_EVENTS.PROCESSED_AT, event.processedAt?.atOffset(ZoneOffset.UTC))
             .set(OUTBOX_EVENTS.RETRY_COUNT, event.retryCount)
+            .set(OUTBOX_EVENTS.STATUS, event.status)
             .execute()
     }
 
@@ -54,19 +55,22 @@ class OutboxGatewayImpl(
                     createdAt = record.get(OUTBOX_EVENTS.CREATED_AT).toInstant(),
                     processedAt = record.get(OUTBOX_EVENTS.PROCESSED_AT)?.toInstant(),
                     retryCount = record.get(OUTBOX_EVENTS.RETRY_COUNT),
+                    status = record.get(OUTBOX_EVENTS.STATUS),
                 )
             }
     }
 
-    override fun markAsProcessed(id: UUID) {
+    override fun markAsSent(id: UUID) {
         dsl.update(OUTBOX_EVENTS)
             .set(OUTBOX_EVENTS.PROCESSED_AT, DSL.offsetDateTime(DSL.currentOffsetDateTime()))
+            .set(OUTBOX_EVENTS.STATUS, "SENT")
             .where(OUTBOX_EVENTS.ID.eq(id))
             .execute()
     }
 
-    override fun incrementRetry(id: UUID) {
+    override fun markAsError(id: UUID) {
         dsl.update(OUTBOX_EVENTS)
+            .set(OUTBOX_EVENTS.STATUS, "ERROR")
             .set(OUTBOX_EVENTS.RETRY_COUNT, OUTBOX_EVENTS.RETRY_COUNT.plus(1))
             .where(OUTBOX_EVENTS.ID.eq(id))
             .execute()

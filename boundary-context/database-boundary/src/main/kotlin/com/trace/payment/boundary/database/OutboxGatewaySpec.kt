@@ -8,6 +8,6 @@ interface OutboxGatewaySpec {
     fun save(event: OutboxEventBO)
     fun save(event: OutboxEventBO, tx: TransactionContext)
     fun findUnprocessed(limit: Int): List<OutboxEventBO>
-    fun markAsProcessed(id: UUID)
-    fun incrementRetry(id: UUID)
+    fun markAsSent(id: UUID)
+    fun markAsError(id: UUID)
 }

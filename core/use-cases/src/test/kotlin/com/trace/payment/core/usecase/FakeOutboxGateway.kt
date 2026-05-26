@@ -9,6 +9,6 @@ object FakeOutboxGateway : OutboxGatewaySpec {
     override fun save(event: OutboxEventBO) {}
     override fun save(event: OutboxEventBO, tx: TransactionContext) {}
     override fun findUnprocessed(limit: Int): List<OutboxEventBO> = emptyList()
-    override fun markAsProcessed(id: UUID) {}
-    override fun incrementRetry(id: UUID) {}
+    override fun markAsSent(id: UUID) {}
+    override fun markAsError(id: UUID) {}
 }
