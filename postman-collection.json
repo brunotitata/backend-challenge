@@ -1,0 +1,224 @@
+{
+  "info": {
+    "name": "Payment API - Trace Challenge",
+    "description": "Collection para testar a API de pagamentos do desafio back-end Trace Finance.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Criar Carteira",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ownerName\": \"João Silva\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/wallets",
+          "host": ["{{baseUrl}}"],
+          "path": ["wallets"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Criar Política VALUE_LIMIT",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"DEFAULT_VALUE_LIMIT\",\n  \"category\": \"VALUE_LIMIT\",\n  \"maxPerPayment\": 1000,\n  \"daytimeDailyLimit\": 4000,\n  \"nighttimeDailyLimit\": 1000,\n  \"weekendDailyLimit\": 1000\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/policies",
+          "host": ["{{baseUrl}}"],
+          "path": ["policies"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Criar Política TX_COUNT_LIMIT",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"DAILY_TX_LIMIT\",\n  \"category\": \"TX_COUNT_LIMIT\",\n  \"dailyTransactionLimit\": 5\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/policies",
+          "host": ["{{baseUrl}}"],
+          "path": ["policies"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Listar Políticas",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/policies",
+          "host": ["{{baseUrl}}"],
+          "path": ["policies"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Consultar Políticas da Carteira",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/policies",
+          "host": ["{{baseUrl}}"],
+          "path": ["wallets", "{{walletId}}", "policies"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Associar Política à Carteira",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"policyId\": \"{{policyId}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/policy",
+          "host": ["{{baseUrl}}"],
+          "path": ["wallets", "{{walletId}}", "policy"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Realizar Pagamento",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "{{$randomUUID}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 999.99,\n  \"occurredAt\": \"2024-08-26T09:42:17.2500Z\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/payments",
+          "host": ["{{baseUrl}}"],
+          "path": ["wallets", "{{walletId}}", "payments"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Listar Pagamentos",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/payments?startDate=2024-08-25T00:00:00.0000Z&endDate=2024-08-26T23:59:59.9999Z",
+          "host": ["{{baseUrl}}"],
+          "path": ["wallets", "{{walletId}}", "payments"],
+          "query": [
+            {
+              "key": "startDate",
+              "value": "2024-08-25T00:00:00.0000Z"
+            },
+            {
+              "key": "endDate",
+              "value": "2024-08-26T23:59:59.9999Z"
+            }
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "walletId",
+      "value": ""
+    },
+    {
+      "key": "policyId",
+      "value": ""
+    }
+  ]
+}

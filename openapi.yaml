@@ -1,0 +1,323 @@
+openapi: 3.0.3
+info:
+  title: Payment API
+  description: API de pagamentos para carteiras virtuais com políticas de limite por período.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: OK
+  /wallets:
+    post:
+      summary: Criar carteira
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ownerName:
+                  type: string
+              required:
+                - ownerName
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  ownerName:
+                    type: string
+                  createdAt:
+                    type: string
+                    format: date-time
+  /wallets/{walletId}/policies:
+    get:
+      summary: Consultar políticas da carteira
+      parameters:
+        - name: walletId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Policy'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+  /wallets/{walletId}/policy:
+    put:
+      summary: Associar política à carteira
+      parameters:
+        - name: walletId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                policyId:
+                  type: string
+                  format: uuid
+              required:
+                - policyId
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  walletId:
+                    type: string
+                    format: uuid
+                  policyId:
+                    type: string
+                    format: uuid
+                  active:
+                    type: boolean
+                  updatedAt:
+                    type: string
+                    format: date-time
+  /policies:
+    post:
+      summary: Criar política
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePolicyRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+    get:
+      summary: Listar políticas
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Policy'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+  /wallets/{walletId}/payments:
+    post:
+      summary: Realizar pagamento
+      parameters:
+        - name: walletId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                occurredAt:
+                  type: string
+                  format: date-time
+              required:
+                - amount
+                - occurredAt
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paymentId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                  amount:
+                    type: number
+                  occurredAt:
+                    type: string
+                    format: date-time
+        '422':
+          description: Limite excedido
+        '409':
+          description: Conflito de idempotência
+    get:
+      summary: Listar pagamentos
+      parameters:
+        - name: walletId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Payment'
+                  meta:
+                    $ref: '#/components/schemas/Meta'
+components:
+  schemas:
+    Policy:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        category:
+          type: string
+        maxPerPayment:
+          type: number
+        daytimeDailyLimit:
+          type: number
+        nighttimeDailyLimit:
+          type: number
+        weekendDailyLimit:
+          type: number
+        dailyTransactionLimit:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CreatePolicyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+        maxPerPayment:
+          type: number
+        daytimeDailyLimit:
+          type: number
+        nighttimeDailyLimit:
+          type: number
+        weekendDailyLimit:
+          type: number
+        dailyTransactionLimit:
+          type: integer
+      required:
+        - name
+        - category
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        walletId:
+          type: string
+          format: uuid
+        amount:
+          type: number
+        occurredAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Meta:
+      type: object
+      properties:
+        nextCursor:
+          type: string
+        previousCursor:
+          type: string
+        total:
+          type: integer
+        totalMatches:
+          type: integer
