@@ -82,6 +82,24 @@ class PolicyIntegrationTest {
     }
 
     @Test
+    fun `POST policies with numeric VALUE_LIMIT amounts returns 201`() = testApplication {
+        application { configureTestApplication() }
+
+        val response = client.post("/policies") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"name":"WEEKDAY_PLUS","category":"VALUE_LIMIT","maxPerPayment":1000,"daytimeDailyLimit":4000,"nighttimeDailyLimit":2000,"weekendDailyLimit":1000}""")
+        }
+
+        assertEquals(HttpStatusCode.Created, response.status)
+        val body = response.bodyAsText()
+        assertTrue(body.contains(""""name":"WEEKDAY_PLUS""""))
+        assertTrue(body.contains(""""maxPerPayment":"1000.00""""))
+        assertTrue(body.contains(""""daytimeDailyLimit":"4000.00""""))
+        assertTrue(body.contains(""""nighttimeDailyLimit":"2000.00""""))
+        assertTrue(body.contains(""""weekendDailyLimit":"1000.00""""))
+    }
+
+    @Test
     fun `POST policies without name returns 400`() = testApplication {
         application { configureTestApplication() }
 

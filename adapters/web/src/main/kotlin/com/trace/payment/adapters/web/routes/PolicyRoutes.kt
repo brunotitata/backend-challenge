@@ -35,10 +35,10 @@ fun Application.configurePolicyRoutes(
             val policy = createPolicyUseCase.execute(
                 name = name,
                 category = category,
-                maxPerPayment = request.maxPerPayment?.let { BigDecimal(it) },
-                daytimeDailyLimit = request.daytimeDailyLimit?.let { BigDecimal(it) },
-                nighttimeDailyLimit = request.nighttimeDailyLimit?.let { BigDecimal(it) },
-                weekendDailyLimit = request.weekendDailyLimit?.let { BigDecimal(it) },
+                maxPerPayment = request.maxPerPayment?.content?.let { BigDecimal(it) },
+                daytimeDailyLimit = request.daytimeDailyLimit?.content?.let { BigDecimal(it) },
+                nighttimeDailyLimit = request.nighttimeDailyLimit?.content?.let { BigDecimal(it) },
+                weekendDailyLimit = request.weekendDailyLimit?.content?.let { BigDecimal(it) },
                 dailyTransactionLimit = request.dailyTransactionLimit,
             )
 
