@@ -4,4 +4,5 @@ plugins {
 
 dependencies {
     implementation(project(":entities"))
+    implementation(project(":common"))
 }
