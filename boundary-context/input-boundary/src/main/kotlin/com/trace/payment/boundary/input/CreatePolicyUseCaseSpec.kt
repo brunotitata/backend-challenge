@@ -11,5 +11,6 @@ interface CreatePolicyUseCaseSpec {
         daytimeDailyLimit: BigDecimal?,
         nighttimeDailyLimit: BigDecimal?,
         weekendDailyLimit: BigDecimal?,
+        dailyTransactionLimit: Int?,
     ): PolicyEntity
 }

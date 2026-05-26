@@ -39,6 +39,7 @@ fun Application.configurePolicyRoutes(
                 daytimeDailyLimit = request.daytimeDailyLimit?.let { BigDecimal(it) },
                 nighttimeDailyLimit = request.nighttimeDailyLimit?.let { BigDecimal(it) },
                 weekendDailyLimit = request.weekendDailyLimit?.let { BigDecimal(it) },
+                dailyTransactionLimit = request.dailyTransactionLimit,
             )
 
             call.respond(
@@ -51,6 +52,7 @@ fun Application.configurePolicyRoutes(
                     daytimeDailyLimit = policy.daytimeDailyLimit?.toString(),
                     nighttimeDailyLimit = policy.nighttimeDailyLimit?.toString(),
                     weekendDailyLimit = policy.weekendDailyLimit?.toString(),
+                    dailyTransactionLimit = policy.dailyTransactionLimit,
                     createdAt = policy.createdAt.toString(),
                     updatedAt = policy.updatedAt.toString(),
                 ),
@@ -70,6 +72,7 @@ fun Application.configurePolicyRoutes(
                             daytimeDailyLimit = policy.daytimeDailyLimit?.toString(),
                             nighttimeDailyLimit = policy.nighttimeDailyLimit?.toString(),
                             weekendDailyLimit = policy.weekendDailyLimit?.toString(),
+                            dailyTransactionLimit = policy.dailyTransactionLimit,
                             createdAt = policy.createdAt.toString(),
                             updatedAt = policy.updatedAt.toString(),
                         )
@@ -93,6 +96,7 @@ fun Application.configurePolicyRoutes(
                             daytimeDailyLimit = policy.daytimeDailyLimit?.toString(),
                             nighttimeDailyLimit = policy.nighttimeDailyLimit?.toString(),
                             weekendDailyLimit = policy.weekendDailyLimit?.toString(),
+                            dailyTransactionLimit = policy.dailyTransactionLimit,
                             active = policy.active ?: false,
                             createdAt = policy.createdAt.toString(),
                             updatedAt = policy.updatedAt.toString(),

@@ -5,5 +5,11 @@ import com.trace.payment.core.entities.PolicyEntity
 import java.math.BigDecimal
 
 interface PolicyEvaluatorSpec {
-    fun evaluate(policy: PolicyEntity, amount: BigDecimal, consumedAmount: BigDecimal, periodType: PeriodType): EvaluationResult
+    fun evaluate(
+        policy: PolicyEntity,
+        amount: BigDecimal,
+        consumedAmount: BigDecimal,
+        periodType: PeriodType,
+        transactionCount: Int = 0,
+    ): EvaluationResult
 }

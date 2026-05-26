@@ -20,6 +20,7 @@ import com.trace.payment.core.usecase.ListWalletPoliciesUseCaseImpl
 import com.trace.payment.core.usecase.PolicyEvaluatorRegistryImpl
 import com.trace.payment.core.usecase.PolicyResolverImpl
 import com.trace.payment.core.usecase.ProcessPaymentUseCaseImpl
+import com.trace.payment.core.usecase.TxCountLimitEvaluator
 import com.trace.payment.core.usecase.ValueLimitEvaluator
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
@@ -37,6 +38,7 @@ fun main() {
         val policyResolver = PolicyResolverImpl(policyDAO)
         val policyRegistry = PolicyEvaluatorRegistryImpl().apply {
             register("VALUE_LIMIT", ValueLimitEvaluator())
+            register("TX_COUNT_LIMIT", TxCountLimitEvaluator())
         }
 
         val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO)

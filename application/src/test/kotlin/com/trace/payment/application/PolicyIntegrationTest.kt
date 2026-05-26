@@ -288,6 +288,94 @@ class PolicyIntegrationTest {
         }
     }
 
+    @Test
+    fun `POST policies with valid TX_COUNT_LIMIT returns 201`() = testApplication {
+        application { configureTestApplication() }
+
+        val response = client.post("/policies") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"name":"DAILY_TX_LIMIT","category":"TX_COUNT_LIMIT","dailyTransactionLimit":5}""")
+        }
+
+        assertEquals(HttpStatusCode.Created, response.status)
+        val body = response.bodyAsText()
+        assertTrue(body.contains(""""name":"DAILY_TX_LIMIT""""))
+        assertTrue(body.contains(""""category":"TX_COUNT_LIMIT""""))
+        assertTrue(body.contains(""""dailyTransactionLimit":5"""))
+        assertTrue(body.contains(""""maxPerPayment":null"""))
+    }
+
+    @Test
+    fun `POST policies TX_COUNT_LIMIT without dailyTransactionLimit returns 400`() = testApplication {
+        application { configureTestApplication() }
+
+        val response = client.post("/policies") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"name":"DAILY_TX_LIMIT","category":"TX_COUNT_LIMIT"}""")
+        }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `POST policies TX_COUNT_LIMIT with zero dailyTransactionLimit returns 400`() = testApplication {
+        application { configureTestApplication() }
+
+        val response = client.post("/policies") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"name":"DAILY_TX_LIMIT","category":"TX_COUNT_LIMIT","dailyTransactionLimit":0}""")
+        }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `POST policies TX_COUNT_LIMIT with negative dailyTransactionLimit returns 400`() = testApplication {
+        application { configureTestApplication() }
+
+        val response = client.post("/policies") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"name":"DAILY_TX_LIMIT","category":"TX_COUNT_LIMIT","dailyTransactionLimit":-1}""")
+        }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `GET policies returns TX_COUNT_LIMIT with specific fields`() = testApplication {
+        application { configureTestApplication() }
+
+        client.post("/policies") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"name":"DAILY_TX_LIMIT","category":"TX_COUNT_LIMIT","dailyTransactionLimit":5}""")
+        }
+
+        val response = client.get("/policies")
+        assertEquals(HttpStatusCode.OK, response.status)
+        val body = response.bodyAsText()
+        assertTrue(body.contains(""""dailyTransactionLimit":5"""))
+        assertTrue(body.contains(""""category":"TX_COUNT_LIMIT""""))
+    }
+
+    @Test
+    fun `GET wallet policies returns TX_COUNT_LIMIT with specific fields`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        val policyId = createTxCountPolicy("DAILY_TX_LIMIT", 5)
+
+        client.put("/wallets/$walletId/policy") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"policyId":"$policyId"}""")
+        }
+
+        val response = client.get("/wallets/$walletId/policies")
+        assertEquals(HttpStatusCode.OK, response.status)
+        val body = response.bodyAsText()
+        assertTrue(body.contains(""""dailyTransactionLimit":5"""))
+        assertTrue(body.contains(""""active":true"""))
+    }
+
     private fun Application.configureTestApplication() {
         val walletDAO = WalletDAOSpecImpl(dsl)
         val policyDAO = PolicyDAOSpecImpl(dsl)
@@ -325,6 +413,22 @@ class PolicyIntegrationTest {
             daytimeDailyLimit = java.math.BigDecimal("4000.00"),
             nighttimeDailyLimit = java.math.BigDecimal("1000.00"),
             weekendDailyLimit = java.math.BigDecimal("1000.00"),
+            dailyTransactionLimit = null,
+        )
+        return policy.id.toString()
+    }
+
+    private fun createTxCountPolicy(name: String, limit: Int): String {
+        val policyDAO = PolicyDAOSpecImpl(dsl)
+        val useCase = CreatePolicyUseCaseImpl(policyDAO)
+        val policy = useCase.execute(
+            name = name,
+            category = "TX_COUNT_LIMIT",
+            maxPerPayment = null,
+            daytimeDailyLimit = null,
+            nighttimeDailyLimit = null,
+            weekendDailyLimit = null,
+            dailyTransactionLimit = limit,
         )
         return policy.id.toString()
     }

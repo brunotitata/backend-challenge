@@ -10,4 +10,5 @@ data class CreatePolicyRequestDTO(
     val daytimeDailyLimit: String? = null,
     val nighttimeDailyLimit: String? = null,
     val weekendDailyLimit: String? = null,
+    val dailyTransactionLimit: Int? = null,
 )

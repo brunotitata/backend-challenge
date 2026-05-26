@@ -13,6 +13,7 @@ class ValueLimitEvaluator : PolicyEvaluatorSpec {
         amount: BigDecimal,
         consumedAmount: BigDecimal,
         periodType: PeriodType,
+        transactionCount: Int,
     ): EvaluationResult {
         val maxPerPayment = policy.maxPerPayment
         if (maxPerPayment != null && amount > maxPerPayment) {

@@ -11,6 +11,7 @@ data class WalletPolicyResponseDTO(
     val daytimeDailyLimit: String?,
     val nighttimeDailyLimit: String?,
     val weekendDailyLimit: String?,
+    val dailyTransactionLimit: Int?,
     val active: Boolean,
     val createdAt: String,
     val updatedAt: String,

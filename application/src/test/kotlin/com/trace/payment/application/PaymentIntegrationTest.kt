@@ -20,6 +20,7 @@ import com.trace.payment.core.usecase.ListWalletPoliciesUseCaseImpl
 import com.trace.payment.core.usecase.PolicyEvaluatorRegistryImpl
 import com.trace.payment.core.usecase.PolicyResolverImpl
 import com.trace.payment.core.usecase.ProcessPaymentUseCaseImpl
+import com.trace.payment.core.usecase.TxCountLimitEvaluator
 import com.trace.payment.core.usecase.ValueLimitEvaluator
 import com.trace.payment.adapters.database.jooq.tables.PaymentIdempotencyKeys.PAYMENT_IDEMPOTENCY_KEYS
 import com.trace.payment.adapters.database.jooq.tables.Payments.PAYMENTS
@@ -1155,6 +1156,119 @@ class PaymentIntegrationTest {
         assertTrue(body.contains(""""totalMatches":null"""))
     }
 
+    @Test
+    fun `POST payments with TX_COUNT_LIMIT approves up to daily limit`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        val policyId = createTxCountPolicy("DAILY_TX_LIMIT", 3)
+        assignPolicy(walletId, policyId)
+
+        val baseTime = "2024-08-26T10:00:00.0000Z"
+        postPayment(client, walletId, 10.0, baseTime, "tx-1")
+        postPayment(client, walletId, 20.0, baseTime, "tx-2")
+        postPayment(client, walletId, 30.0, baseTime, "tx-3")
+
+        val fourth = client.post("/wallets/$walletId/payments") {
+            contentType(ContentType.Application.Json)
+            header("Idempotency-Key", "tx-4")
+            setBody("""{"amount":40.0,"occurredAt":"$baseTime"}""")
+        }
+        assertEquals(HttpStatusCode.UnprocessableEntity, fourth.status)
+    }
+
+    @Test
+    fun `POST payments with TX_COUNT_LIMIT resets next day`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        val policyId = createTxCountPolicy("DAILY_TX_LIMIT", 2)
+        assignPolicy(walletId, policyId)
+
+        postPayment(client, walletId, 10.0, "2024-08-26T10:00:00.0000Z", "tx-day1-a")
+        postPayment(client, walletId, 20.0, "2024-08-26T14:00:00.0000Z", "tx-day1-b")
+
+        val nextDay = client.post("/wallets/$walletId/payments") {
+            contentType(ContentType.Application.Json)
+            header("Idempotency-Key", "tx-day2-a")
+            setBody("""{"amount":30.0,"occurredAt":"2024-08-27T10:00:00.0000Z"}""")
+        }
+        assertEquals(HttpStatusCode.Created, nextDay.status)
+    }
+
+    @Test
+    fun `POST payments with TX_COUNT_LIMIT does not depend on amount`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        val policyId = createTxCountPolicy("DAILY_TX_LIMIT", 2)
+        assignPolicy(walletId, policyId)
+
+        val largeAmount = client.post("/wallets/$walletId/payments") {
+            contentType(ContentType.Application.Json)
+            header("Idempotency-Key", "tx-large")
+            setBody("""{"amount":999999.99,"occurredAt":"2024-08-26T10:00:00.0000Z"}""")
+        }
+        assertEquals(HttpStatusCode.Created, largeAmount.status)
+    }
+
+    @Test
+    fun `POST payments with TX_COUNT_LIMIT concurrent requests do not exceed limit`() {
+        val httpClient = HttpClient.newHttpClient()
+        val executor = Executors.newFixedThreadPool(3)
+
+        val policyId = httpClient.send(
+            HttpRequest.newBuilder()
+                .uri(java.net.URI.create("http://localhost:$port/policies"))
+                .header("Content-Type", "application/json")
+                .method("POST", HttpRequest.BodyPublishers.ofString(
+                    """{"name":"DAILY_TX_LIMIT","category":"TX_COUNT_LIMIT","dailyTransactionLimit":2}""",
+                ))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(),
+        ).body().let { body ->
+            Regex(""""id":"([^"]+)""").find(body)?.groupValues?.get(1)
+                ?: error("Could not parse policy id from: $body")
+        }
+
+        val walletId = createWallet("TxCountWallet")
+
+        httpClient.send(
+            HttpRequest.newBuilder()
+                .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/policy"))
+                .header("Content-Type", "application/json")
+                .method("PUT", HttpRequest.BodyPublishers.ofString("""{"policyId":"$policyId"}"""))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(),
+        )
+
+        fun postPayment(key: String): HttpResponse<String> = httpClient.send(
+            HttpRequest.newBuilder()
+                .uri(java.net.URI.create("http://localhost:$port/wallets/$walletId/payments"))
+                .header("Content-Type", "application/json")
+                .header("Idempotency-Key", key)
+                .method("POST", HttpRequest.BodyPublishers.ofString("""{"amount":10.0,"occurredAt":"2024-08-26T10:00:00.0000Z"}"""))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(),
+        )
+
+        val futures = listOf(
+            executor.submit<HttpResponse<String>> { postPayment("tx-concurrent-a") },
+            executor.submit<HttpResponse<String>> { postPayment("tx-concurrent-b") },
+            executor.submit<HttpResponse<String>> { postPayment("tx-concurrent-c") },
+        )
+
+        executor.shutdown()
+        executor.awaitTermination(10, TimeUnit.SECONDS)
+
+        val results = futures.map { it.get() }
+        val approved = results.count { it.statusCode() == 201 }
+        val rejected = results.count { it.statusCode() == 422 }
+
+        assertEquals(2, approved, "Expected exactly 2 approved, got $approved")
+        assertEquals(1, rejected, "Expected exactly 1 rejected, got $rejected")
+    }
+
     private fun Application.configureTestApplication() {
         configureApplication(dsl)
     }
@@ -1164,6 +1278,28 @@ class PaymentIntegrationTest {
         val useCase = CreateWalletUseCaseSpecImpl(walletDAO)
         val wallet = useCase.execute(ownerName)
         return wallet.id.toString()
+    }
+
+    private fun createTxCountPolicy(name: String, limit: Int): String {
+        val policyDAO = PolicyDAOSpecImpl(dsl)
+        val useCase = CreatePolicyUseCaseImpl(policyDAO)
+        val policy = useCase.execute(
+            name = name,
+            category = "TX_COUNT_LIMIT",
+            maxPerPayment = null,
+            daytimeDailyLimit = null,
+            nighttimeDailyLimit = null,
+            weekendDailyLimit = null,
+            dailyTransactionLimit = limit,
+        )
+        return policy.id.toString()
+    }
+
+    private fun assignPolicy(walletId: String, policyId: String) {
+        val policyDAO = PolicyDAOSpecImpl(dsl)
+        val walletDAO = WalletDAOSpecImpl(dsl)
+        val useCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO)
+        useCase.execute(UUID.fromString(walletId), UUID.fromString(policyId))
     }
 
     companion object {
@@ -1209,6 +1345,7 @@ private fun Application.configureApplication(dsl: DSLContext) {
     val policyResolver = PolicyResolverImpl(policyDAO)
     val policyRegistry = PolicyEvaluatorRegistryImpl().apply {
         register("VALUE_LIMIT", ValueLimitEvaluator())
+        register("TX_COUNT_LIMIT", TxCountLimitEvaluator())
     }
 
     val createWalletUseCase = CreateWalletUseCaseSpecImpl(walletDAO)

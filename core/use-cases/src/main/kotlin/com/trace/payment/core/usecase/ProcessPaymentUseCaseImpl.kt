@@ -11,6 +11,7 @@ import com.trace.payment.boundary.input.PolicyEvaluatorRegistrySpec
 import com.trace.payment.boundary.input.PolicyResolverSpec
 import com.trace.payment.boundary.input.ProcessPaymentUseCaseSpec
 import com.trace.payment.core.entities.PeriodClassifier
+import com.trace.payment.core.entities.PeriodType
 import com.trace.payment.core.entities.PaymentEntity
 import java.math.BigDecimal
 import java.time.Instant
@@ -49,17 +50,24 @@ class ProcessPaymentUseCaseImpl(
         val classification = PeriodClassifier.classify(occurredAt, zone)
         val hash = RequestHashUtil.computeHash(amount, occurredAt)
 
+        val (limitPeriodType, limitPeriodStart) = if (policy.category == "TX_COUNT_LIMIT") {
+            val startOfDay = occurredAt.atZone(zone).toLocalDate().atStartOfDay(zone).toInstant()
+            PeriodType.DAYTIME to startOfDay
+        } else {
+            classification.periodType to classification.periodStart
+        }
+
         val result = paymentGateway.processPaymentInTransaction(
             walletId = walletId,
             policyId = policy.id,
             amount = amount,
             occurredAt = occurredAt,
-            periodType = classification.periodType,
-            periodStart = classification.periodStart,
+            periodType = limitPeriodType,
+            periodStart = limitPeriodStart,
             idempotencyKey = idempotencyKey,
             requestHash = hash,
-            checkLimit = { consumedAmount ->
-                val evaluation = evaluator.evaluate(policy, amount, consumedAmount, classification.periodType)
+            checkLimit = { consumedAmount, transactionCount ->
+                val evaluation = evaluator.evaluate(policy, amount, consumedAmount, classification.periodType, transactionCount)
                 evaluation.approved
             },
         )

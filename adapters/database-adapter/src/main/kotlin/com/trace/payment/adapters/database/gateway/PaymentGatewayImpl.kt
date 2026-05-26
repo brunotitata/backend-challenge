@@ -31,7 +31,7 @@ class PaymentGatewayImpl(
         periodStart: Instant,
         idempotencyKey: String,
         requestHash: String,
-        checkLimit: (consumedAmount: BigDecimal) -> Boolean,
+        checkLimit: (consumedAmount: BigDecimal, transactionCount: Int) -> Boolean,
     ): TransactionResult {
         return dsl.transactionResult { configuration ->
             val tx = DSL.using(configuration)
@@ -91,8 +91,9 @@ class PaymentGatewayImpl(
                 LIMIT_CONSUMPTIONS.PERIOD_TYPE,
                 LIMIT_CONSUMPTIONS.PERIOD_START,
                 LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT,
+                LIMIT_CONSUMPTIONS.TRANSACTION_COUNT,
             )
-                .values(walletId, policyId, periodType.name, periodStart.atOffset(ZoneOffset.UTC), BigDecimal.ZERO)
+                .values(walletId, policyId, periodType.name, periodStart.atOffset(ZoneOffset.UTC), BigDecimal.ZERO, 0)
                 .onConflict(
                     LIMIT_CONSUMPTIONS.WALLET_ID,
                     LIMIT_CONSUMPTIONS.POLICY_ID,
@@ -102,18 +103,20 @@ class PaymentGatewayImpl(
                 .doNothing()
                 .execute()
 
-            val consumedAmount = tx
-                .select(LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT)
+            val consumptionRecord = tx
+                .select(LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT, LIMIT_CONSUMPTIONS.TRANSACTION_COUNT)
                 .from(LIMIT_CONSUMPTIONS)
                 .where(LIMIT_CONSUMPTIONS.WALLET_ID.eq(walletId))
                 .and(LIMIT_CONSUMPTIONS.POLICY_ID.eq(policyId))
                 .and(LIMIT_CONSUMPTIONS.PERIOD_TYPE.eq(periodType.name))
                 .and(LIMIT_CONSUMPTIONS.PERIOD_START.eq(periodStart.atOffset(ZoneOffset.UTC)))
                 .forUpdate()
-                .fetchOne { it.get(LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT) }
-                ?: BigDecimal.ZERO
+                .fetchOne()
 
-            if (!checkLimit(consumedAmount)) {
+            val consumedAmount = consumptionRecord?.get(LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT) ?: BigDecimal.ZERO
+            val transactionCount = consumptionRecord?.get(LIMIT_CONSUMPTIONS.TRANSACTION_COUNT) ?: 0
+
+            if (!checkLimit(consumedAmount, transactionCount)) {
                 tx.update(PAYMENT_IDEMPOTENCY_KEYS)
                     .set(PAYMENT_IDEMPOTENCY_KEYS.RESPONSE_STATUS, 422)
                     .set(PAYMENT_IDEMPOTENCY_KEYS.UPDATED_AT, OffsetDateTime.now())
@@ -145,8 +148,9 @@ class PaymentGatewayImpl(
                 LIMIT_CONSUMPTIONS.PERIOD_TYPE,
                 LIMIT_CONSUMPTIONS.PERIOD_START,
                 LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT,
+                LIMIT_CONSUMPTIONS.TRANSACTION_COUNT,
             )
-                .values(walletId, policyId, periodType.name, periodStart.atOffset(ZoneOffset.UTC), amount)
+                .values(walletId, policyId, periodType.name, periodStart.atOffset(ZoneOffset.UTC), amount, 1)
                 .onConflict(
                     LIMIT_CONSUMPTIONS.WALLET_ID,
                     LIMIT_CONSUMPTIONS.POLICY_ID,
@@ -155,6 +159,7 @@ class PaymentGatewayImpl(
                 )
                 .doUpdate()
                 .set(LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT, LIMIT_CONSUMPTIONS.CONSUMED_AMOUNT.plus(amount))
+                .set(LIMIT_CONSUMPTIONS.TRANSACTION_COUNT, LIMIT_CONSUMPTIONS.TRANSACTION_COUNT.plus(1))
                 .execute()
 
             tx.update(PAYMENT_IDEMPOTENCY_KEYS)

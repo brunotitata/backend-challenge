@@ -11,6 +11,7 @@ data class PolicyResponseDTO(
     val daytimeDailyLimit: String?,
     val nighttimeDailyLimit: String?,
     val weekendDailyLimit: String?,
+    val dailyTransactionLimit: Int?,
     val createdAt: String,
     val updatedAt: String,
 )

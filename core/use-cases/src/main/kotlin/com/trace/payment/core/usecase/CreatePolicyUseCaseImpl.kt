@@ -19,6 +19,7 @@ class CreatePolicyUseCaseImpl(
         daytimeDailyLimit: BigDecimal?,
         nighttimeDailyLimit: BigDecimal?,
         weekendDailyLimit: BigDecimal?,
+        dailyTransactionLimit: Int?,
     ): PolicyEntity {
         if (name.isBlank()) throw ValidationException("name must not be blank")
         if (category.isBlank()) throw ValidationException("category must not be blank")
@@ -28,6 +29,9 @@ class CreatePolicyUseCaseImpl(
             requirePositive("daytimeDailyLimit", daytimeDailyLimit)
             requirePositive("nighttimeDailyLimit", nighttimeDailyLimit)
             requirePositive("weekendDailyLimit", weekendDailyLimit)
+        } else if (category == "TX_COUNT_LIMIT") {
+            if (dailyTransactionLimit == null) throw ValidationException("dailyTransactionLimit is required for TX_COUNT_LIMIT")
+            if (dailyTransactionLimit <= 0) throw ValidationException("dailyTransactionLimit must be greater than zero")
         } else {
             throw ValidationException("unknown category: $category")
         }
@@ -41,7 +45,7 @@ class CreatePolicyUseCaseImpl(
             daytimeDailyLimit = daytimeDailyLimit,
             nighttimeDailyLimit = nighttimeDailyLimit,
             weekendDailyLimit = weekendDailyLimit,
-            dailyTransactionLimit = null,
+            dailyTransactionLimit = dailyTransactionLimit,
             createdAt = now,
             updatedAt = now,
         )
