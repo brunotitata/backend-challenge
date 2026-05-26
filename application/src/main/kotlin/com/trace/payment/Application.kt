@@ -14,6 +14,7 @@ import com.trace.payment.adapters.web.routes.configureWalletRoutes
 import com.trace.payment.core.usecase.AssignPolicyUseCaseImpl
 import com.trace.payment.core.usecase.CreatePolicyUseCaseImpl
 import com.trace.payment.core.usecase.CreateWalletUseCaseSpecImpl
+import com.trace.payment.core.usecase.ListPaymentsUseCaseImpl
 import com.trace.payment.core.usecase.ListPoliciesUseCaseImpl
 import com.trace.payment.core.usecase.ListWalletPoliciesUseCaseImpl
 import com.trace.payment.core.usecase.PolicyEvaluatorRegistryImpl
@@ -44,6 +45,7 @@ fun main() {
         val listWalletPoliciesUseCase = ListWalletPoliciesUseCaseImpl(policyDAO, walletDAO)
         val assignPolicyUseCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO)
         val processPaymentUseCase = ProcessPaymentUseCaseImpl(walletDAO, policyResolver, policyRegistry, paymentGateway)
+        val listPaymentsUseCase = ListPaymentsUseCaseImpl(walletDAO, paymentGateway)
 
         configureSerialization()
         configureErrorHandling()
@@ -55,6 +57,6 @@ fun main() {
             listWalletPoliciesUseCase = listWalletPoliciesUseCase,
             assignPolicyUseCase = assignPolicyUseCase,
         )
-        configurePaymentRoutes(processPaymentUseCase)
+        configurePaymentRoutes(processPaymentUseCase, listPaymentsUseCase)
     }.start(wait = true)
 }

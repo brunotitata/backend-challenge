@@ -5,8 +5,11 @@ import com.trace.payment.adapters.database.jooq.tables.PaymentIdempotencyKeys.PA
 import com.trace.payment.adapters.database.jooq.tables.Payments.PAYMENTS
 import com.trace.payment.boundary.database.PaymentGatewaySpec
 import com.trace.payment.boundary.database.TransactionResult
+import com.trace.payment.core.entities.Cursor
+import com.trace.payment.core.entities.PaginationResult
 import com.trace.payment.core.entities.PaymentEntity
 import com.trace.payment.core.entities.PeriodType
+import org.jooq.Condition
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import java.math.BigDecimal
@@ -197,6 +200,116 @@ class PaymentGatewayImpl(
                     updatedAt = record.get(PAYMENTS.UPDATED_AT).toInstant(),
                 )
             }
+    }
+
+    override fun findApprovedByWalletId(
+        walletId: UUID,
+        startDate: Instant?,
+        endDate: Instant?,
+        cursor: String?,
+        limit: Int,
+    ): PaginationResult<PaymentEntity> {
+        val conditions = mutableListOf<Condition>(
+            PAYMENTS.WALLET_ID.eq(walletId),
+            PAYMENTS.STATUS.eq("APPROVED"),
+        )
+
+        if (startDate != null) {
+            conditions.add(PAYMENTS.OCCURRED_AT.ge(startDate.atOffset(ZoneOffset.UTC)))
+        }
+        if (endDate != null) {
+            conditions.add(PAYMENTS.OCCURRED_AT.le(endDate.atOffset(ZoneOffset.UTC)))
+        }
+
+        val parsedCursor = cursor?.let { Cursor.decode(it) }
+
+        if (parsedCursor != null) {
+            if (parsedCursor.direction == Cursor.Direction.FWD) {
+                conditions.add(
+                    PAYMENTS.OCCURRED_AT.gt(parsedCursor.occurredAt.atOffset(ZoneOffset.UTC))
+                        .or(
+                            PAYMENTS.OCCURRED_AT.eq(parsedCursor.occurredAt.atOffset(ZoneOffset.UTC))
+                                .and(PAYMENTS.ID.gt(parsedCursor.id)),
+                        ),
+                )
+            } else {
+                conditions.add(
+                    PAYMENTS.OCCURRED_AT.lt(parsedCursor.occurredAt.atOffset(ZoneOffset.UTC))
+                        .or(
+                            PAYMENTS.OCCURRED_AT.eq(parsedCursor.occurredAt.atOffset(ZoneOffset.UTC))
+                                .and(PAYMENTS.ID.lt(parsedCursor.id)),
+                        ),
+                )
+            }
+        }
+
+        val isBackward = parsedCursor?.direction == Cursor.Direction.BWD
+        val orderField = if (isBackward) {
+            PAYMENTS.OCCURRED_AT.desc()
+        } else {
+            PAYMENTS.OCCURRED_AT.asc()
+        }
+        val orderId = if (isBackward) {
+            PAYMENTS.ID.desc()
+        } else {
+            PAYMENTS.ID.asc()
+        }
+
+        val items = dsl
+            .selectFrom(PAYMENTS)
+            .where(conditions)
+            .orderBy(orderField, orderId)
+            .limit(limit + 1)
+            .fetch { record ->
+                PaymentEntity(
+                    id = record.get(PAYMENTS.ID),
+                    walletId = record.get(PAYMENTS.WALLET_ID),
+                    policyId = record.get(PAYMENTS.POLICY_ID),
+                    amount = record.get(PAYMENTS.AMOUNT),
+                    occurredAt = record.get(PAYMENTS.OCCURRED_AT).toInstant(),
+                    periodType = PeriodType.valueOf(record.get(PAYMENTS.PERIOD_TYPE)),
+                    periodStart = record.get(PAYMENTS.PERIOD_START).toInstant(),
+                    status = record.get(PAYMENTS.STATUS),
+                    createdAt = record.get(PAYMENTS.CREATED_AT).toInstant(),
+                    updatedAt = record.get(PAYMENTS.UPDATED_AT).toInstant(),
+                )
+            }
+
+        if (isBackward) {
+            items.reverse()
+        }
+
+        val hasNext = items.size > limit
+        val pageItems = if (hasNext) items.take(limit) else items
+
+        val nextCursor = if (hasNext) {
+            val last = pageItems.last()
+            Cursor(last.occurredAt, last.id, Cursor.Direction.FWD).encode()
+        } else {
+            null
+        }
+
+        val previousCursor = if (pageItems.isNotEmpty() && cursor != null) {
+            val first = pageItems.first()
+            Cursor(first.occurredAt, first.id, Cursor.Direction.BWD).encode()
+        } else {
+            null
+        }
+
+        val total = dsl
+            .selectCount()
+            .from(PAYMENTS)
+            .where(PAYMENTS.WALLET_ID.eq(walletId))
+            .and(PAYMENTS.STATUS.eq("APPROVED"))
+            .fetchOne { it.get(0) as Int }
+            ?: 0
+
+        return PaginationResult(
+            items = pageItems,
+            nextCursor = nextCursor,
+            previousCursor = previousCursor,
+            total = total,
+        )
     }
 
     private fun findByIdInternal(tx: DSLContext, paymentId: UUID): PaymentEntity? {

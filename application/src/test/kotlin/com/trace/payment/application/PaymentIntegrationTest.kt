@@ -14,6 +14,7 @@ import com.trace.payment.boundary.common.DatabaseConfigBO
 import com.trace.payment.core.usecase.AssignPolicyUseCaseImpl
 import com.trace.payment.core.usecase.CreatePolicyUseCaseImpl
 import com.trace.payment.core.usecase.CreateWalletUseCaseSpecImpl
+import com.trace.payment.core.usecase.ListPaymentsUseCaseImpl
 import com.trace.payment.core.usecase.ListPoliciesUseCaseImpl
 import com.trace.payment.core.usecase.ListWalletPoliciesUseCaseImpl
 import com.trace.payment.core.usecase.PolicyEvaluatorRegistryImpl
@@ -21,6 +22,7 @@ import com.trace.payment.core.usecase.PolicyResolverImpl
 import com.trace.payment.core.usecase.ProcessPaymentUseCaseImpl
 import com.trace.payment.core.usecase.ValueLimitEvaluator
 import com.trace.payment.adapters.database.jooq.tables.PaymentIdempotencyKeys.PAYMENT_IDEMPOTENCY_KEYS
+import com.trace.payment.adapters.database.jooq.tables.Payments.PAYMENTS
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
@@ -819,6 +821,340 @@ class PaymentIntegrationTest {
         )
     }
 
+    @Test
+    fun `GET payments lists all approved payments without filter`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        postPayment(client, walletId, 100.0, "2024-08-26T10:00:00.0000Z", "list-all-1")
+        postPayment(client, walletId, 200.0, "2024-08-26T11:00:00.0000Z", "list-all-2")
+        postPayment(client, walletId, 300.0, "2024-08-26T12:00:00.0000Z", "list-all-3")
+
+        val response = client.get("/wallets/$walletId/payments")
+        val body = response.bodyAsText()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(body.contains(""""total":3"""))
+        assertTrue(body.contains(""""amount":"100.00""""))
+        assertTrue(body.contains(""""amount":"200.00""""))
+        assertTrue(body.contains(""""amount":"300.00""""))
+        assertTrue(body.contains(""""totalMatches":null"""))
+    }
+
+    @Test
+    fun `GET payments filters by startDate`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        postPayment(client, walletId, 100.0, "2024-08-25T10:00:00.0000Z", "start-filter-1")
+        postPayment(client, walletId, 200.0, "2024-08-26T10:00:00.0000Z", "start-filter-2")
+        postPayment(client, walletId, 300.0, "2024-08-27T10:00:00.0000Z", "start-filter-3")
+
+        val response = client.get("/wallets/$walletId/payments") {
+            parameter("startDate", "2024-08-26T00:00:00.0000Z")
+        }
+        val body = response.bodyAsText()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(body.contains(""""amount":"200.00""""))
+        assertTrue(body.contains(""""amount":"300.00""""))
+        assertTrue(!body.contains(""""amount":"100.00""""))
+    }
+
+    @Test
+    fun `GET payments filters by endDate`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        postPayment(client, walletId, 100.0, "2024-08-25T10:00:00.0000Z", "end-filter-1")
+        postPayment(client, walletId, 200.0, "2024-08-26T10:00:00.0000Z", "end-filter-2")
+        postPayment(client, walletId, 300.0, "2024-08-27T10:00:00.0000Z", "end-filter-3")
+
+        val response = client.get("/wallets/$walletId/payments") {
+            parameter("endDate", "2024-08-26T23:59:59.9999Z")
+        }
+        val body = response.bodyAsText()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(body.contains(""""amount":"100.00""""))
+        assertTrue(body.contains(""""amount":"200.00""""))
+        assertTrue(!body.contains(""""amount":"300.00""""))
+    }
+
+    @Test
+    fun `GET payments filters by startDate and endDate interval`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        postPayment(client, walletId, 100.0, "2024-08-25T10:00:00.0000Z", "interval-1")
+        postPayment(client, walletId, 200.0, "2024-08-26T10:00:00.0000Z", "interval-2")
+        postPayment(client, walletId, 300.0, "2024-08-27T10:00:00.0000Z", "interval-3")
+
+        val response = client.get("/wallets/$walletId/payments") {
+            parameter("startDate", "2024-08-26T00:00:00.0000Z")
+            parameter("endDate", "2024-08-26T23:59:59.9999Z")
+        }
+        val body = response.bodyAsText()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(body.contains(""""amount":"200.00""""))
+        assertTrue(!body.contains(""""amount":"100.00""""))
+        assertTrue(!body.contains(""""amount":"300.00""""))
+    }
+
+    @Test
+    fun `GET payments returns nextCursor when more pages exist`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        repeat(25) { i ->
+            val day = "26"
+            val minute = i
+            val hour = minute / 60
+            val min = minute % 60
+            postPayment(client, walletId, 10.0, "2024-08-${day}T${"%02d".format(hour)}:${"%02d".format(min)}:00.0000Z", "cursor-test-$i")
+        }
+
+        val response = client.get("/wallets/$walletId/payments") {
+            parameter("limit", "20")
+        }
+        val body = response.bodyAsText()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(body.contains(""""nextCursor":""""), "Response should contain nextCursor")
+    }
+
+    @Test
+    fun `GET payments uses cursor for next page`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        repeat(25) { i ->
+            val day = "26"
+            val minute = i
+            val hour = minute / 60
+            val min = minute % 60
+            postPayment(client, walletId, 10.0, "2024-08-${day}T${"%02d".format(hour)}:${"%02d".format(min)}:00.0000Z", "cursor-next-$i")
+        }
+
+        val firstResponse = client.get("/wallets/$walletId/payments") {
+            parameter("limit", "20")
+        }
+        val firstBody = firstResponse.bodyAsText()
+
+        val nextCursor = """nextCursor":"([^"]+)""".toRegex().find(firstBody)?.groupValues?.getOrNull(1)
+            ?: throw AssertionError("nextCursor should not be null")
+
+        val secondResponse = client.get("/wallets/$walletId/payments") {
+            parameter("limit", "20")
+            parameter("cursor", nextCursor)
+        }
+        val secondBody = secondResponse.bodyAsText()
+
+        assertEquals(HttpStatusCode.OK, secondResponse.status)
+        assertTrue(secondBody.contains(""""amount":"10.00""""), "Second page should contain payments")
+    }
+
+    @Test
+    fun `GET payments provides previousCursor for reverse navigation`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        repeat(25) { i ->
+            val day = "26"
+            val minute = i
+            val hour = minute / 60
+            val min = minute % 60
+            postPayment(client, walletId, 10.0, "2024-08-${day}T${"%02d".format(hour)}:${"%02d".format(min)}:00.0000Z", "prev-cursor-$i")
+        }
+
+        val firstResponse = client.get("/wallets/$walletId/payments") {
+            parameter("limit", "20")
+        }
+        val nextCursor = """nextCursor":"([^"]+)""".toRegex().find(firstResponse.bodyAsText())?.groupValues?.getOrNull(1)
+            ?: throw AssertionError("nextCursor should not be null")
+
+        val secondResponse = client.get("/wallets/$walletId/payments") {
+            parameter("limit", "20")
+            parameter("cursor", nextCursor)
+        }
+        val secondBody = secondResponse.bodyAsText()
+        assertEquals(HttpStatusCode.OK, secondResponse.status)
+
+        val previousCursor = """previousCursor":"([^"]+)""".toRegex().find(secondBody)?.groupValues?.getOrNull(1)
+            ?: throw AssertionError("previousCursor should not be null for second page")
+
+        val backResponse = client.get("/wallets/$walletId/payments") {
+            parameter("cursor", previousCursor)
+        }
+        assertEquals(HttpStatusCode.OK, backResponse.status)
+    }
+
+    @Test
+    fun `GET payments maintains stable ordering for same occurredAt`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        postPayment(client, walletId, 100.0, "2024-08-26T10:00:00.0000Z", "same-time-1")
+        postPayment(client, walletId, 200.0, "2024-08-26T10:00:00.0000Z", "same-time-2")
+        postPayment(client, walletId, 300.0, "2024-08-26T10:00:00.0000Z", "same-time-3")
+
+        val response = client.get("/wallets/$walletId/payments")
+        val body = response.bodyAsText()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val amountPattern = """amount":"([^"]+)""".toRegex()
+        val amounts = amountPattern.findAll(body).map { it.groupValues[1] }.toList()
+        assertEquals(3, amounts.size, "Should return 3 payments")
+    }
+
+    @Test
+    fun `GET payments does not mix payments from different wallets`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletA = createWallet("Alice")
+        createWallet("Bob")
+        postPayment(client, walletA, 100.0, "2024-08-26T10:00:00.0000Z", "no-mix-a")
+        postPayment(client, walletA, 200.0, "2024-08-26T10:00:00.0000Z", "no-mix-b")
+
+        val response = client.get("/wallets/$walletA/payments")
+        val body = response.bodyAsText()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(body.contains(""""amount":"100.00""""))
+        assertTrue(body.contains(""""amount":"200.00""""))
+    }
+
+    @Test
+    fun `GET payments lists only APPROVED payments`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        postPayment(client, walletId, 100.0, "2024-08-26T10:00:00.0000Z", "only-approved-1")
+
+        val policyId = dsl.select(
+            com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES.POLICY_ID,
+        ).from(com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES)
+            .where(com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES.WALLET_ID.eq(java.util.UUID.fromString(walletId)))
+            .and(com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES.ACTIVE.eq(true))
+            .fetchOne { it.get(com.trace.payment.adapters.database.jooq.tables.WalletPolicies.WALLET_POLICIES.POLICY_ID) }
+            ?: throw AssertionError("No active policy found for wallet")
+
+        dsl.insertInto(
+            PAYMENTS,
+            PAYMENTS.ID, PAYMENTS.WALLET_ID, PAYMENTS.POLICY_ID, PAYMENTS.AMOUNT,
+            PAYMENTS.OCCURRED_AT, PAYMENTS.PERIOD_TYPE, PAYMENTS.PERIOD_START,
+            PAYMENTS.STATUS, PAYMENTS.CREATED_AT, PAYMENTS.UPDATED_AT,
+        ).values(
+            UUID.randomUUID(), java.util.UUID.fromString(walletId),
+            policyId,
+            java.math.BigDecimal("50.00"),
+            java.time.OffsetDateTime.parse("2024-08-26T11:00:00.0000Z"),
+            "DAYTIME", java.time.OffsetDateTime.parse("2024-08-26T06:00:00.0000Z"),
+            "REJECTED", java.time.OffsetDateTime.now(), java.time.OffsetDateTime.now(),
+        ).execute()
+
+        val response = client.get("/wallets/$walletId/payments")
+        val body = response.bodyAsText()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(body.contains(""""total":1"""), "Should count only APPROVED payments")
+        assertTrue(body.contains(""""amount":"100.00""""), "Should list only the APPROVED payment")
+        assertTrue(!body.contains(""""amount":"50.00""""), "Should NOT list the REJECTED payment")
+    }
+
+    @Test
+    fun `GET payments with non-existent wallet returns 404`() = testApplication {
+        application { configureTestApplication() }
+
+        val response = client.get("/wallets/${UUID.randomUUID()}/payments")
+        assertEquals(HttpStatusCode.NotFound, response.status)
+    }
+
+    @Test
+    fun `GET payments with invalid startDate returns 400`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        val response = client.get("/wallets/$walletId/payments") {
+            parameter("startDate", "invalid-date")
+        }
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `GET payments with invalid endDate returns 400`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        val response = client.get("/wallets/$walletId/payments") {
+            parameter("endDate", "not-a-date")
+        }
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `GET payments with startDate after endDate returns 400`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        val response = client.get("/wallets/$walletId/payments") {
+            parameter("startDate", "2024-08-27T00:00:00.0000Z")
+            parameter("endDate", "2024-08-26T00:00:00.0000Z")
+        }
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `GET payments with invalid cursor returns 400`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        val response = client.get("/wallets/$walletId/payments") {
+            parameter("cursor", "not-a-valid-cursor")
+        }
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `GET payments with zero limit returns 400`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        val response = client.get("/wallets/$walletId/payments") {
+            parameter("limit", "0")
+        }
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `GET payments with limit above max returns 400`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        val response = client.get("/wallets/$walletId/payments") {
+            parameter("limit", "200")
+        }
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `GET payments meta contains expected fields`() = testApplication {
+        application { configureTestApplication() }
+
+        val walletId = createWallet("Maria")
+        postPayment(client, walletId, 100.0, "2024-08-26T10:00:00.0000Z", "meta-fields")
+
+        val response = client.get("/wallets/$walletId/payments")
+        val body = response.bodyAsText()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(body.contains(""""nextCursor"""))
+        assertTrue(body.contains(""""previousCursor"""))
+        assertTrue(body.contains(""""total"""))
+        assertTrue(body.contains(""""totalMatches":null"""))
+    }
+
     private fun Application.configureTestApplication() {
         configureApplication(dsl)
     }
@@ -881,6 +1217,7 @@ private fun Application.configureApplication(dsl: DSLContext) {
     val listWalletPoliciesUseCase = ListWalletPoliciesUseCaseImpl(policyDAO, walletDAO)
     val assignPolicyUseCase = AssignPolicyUseCaseImpl(policyDAO, walletDAO)
     val processPaymentUseCase = ProcessPaymentUseCaseImpl(walletDAO, policyResolver, policyRegistry, paymentGateway)
+    val listPaymentsUseCase = ListPaymentsUseCaseImpl(walletDAO, paymentGateway)
 
     configureSerialization()
     configureErrorHandling()
@@ -891,5 +1228,25 @@ private fun Application.configureApplication(dsl: DSLContext) {
         listWalletPoliciesUseCase = listWalletPoliciesUseCase,
         assignPolicyUseCase = assignPolicyUseCase,
     )
-    configurePaymentRoutes(processPaymentUseCase)
+    configurePaymentRoutes(processPaymentUseCase, listPaymentsUseCase)
+}
+
+private suspend fun postPayment(
+    client: io.ktor.client.HttpClient,
+    walletId: String,
+    amount: Double,
+    occurredAt: String,
+    idempotencyKey: String,
+) {
+    val body = """{"amount":$amount,"occurredAt":"$occurredAt"}"""
+    val response = client.post("/wallets/$walletId/payments") {
+        contentType(ContentType.Application.Json)
+        header("Idempotency-Key", idempotencyKey)
+        setBody(body)
+    }
+    kotlin.test.assertEquals(
+        HttpStatusCode.Created,
+        response.status,
+        "Failed to create payment: $body, status=${response.status}",
+    )
 }
