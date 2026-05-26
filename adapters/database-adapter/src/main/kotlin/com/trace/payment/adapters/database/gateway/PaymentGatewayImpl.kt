@@ -1,6 +1,7 @@
 package com.trace.payment.adapters.database.gateway
 
 import com.trace.payment.adapters.database.jooq.tables.LimitConsumptions.LIMIT_CONSUMPTIONS
+import com.trace.payment.adapters.database.jooq.tables.PaymentAuditEvents.PAYMENT_AUDIT_EVENTS
 import com.trace.payment.adapters.database.jooq.tables.PaymentIdempotencyKeys.PAYMENT_IDEMPOTENCY_KEYS
 import com.trace.payment.adapters.database.jooq.tables.Payments.PAYMENTS
 import com.trace.payment.boundary.database.PaymentGatewaySpec
@@ -12,6 +13,7 @@ import com.trace.payment.core.entities.PeriodType
 import org.jooq.Condition
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
+import org.slf4j.LoggerFactory
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -21,6 +23,8 @@ import java.util.UUID
 class PaymentGatewayImpl(
     private val dsl: DSLContext,
 ) : PaymentGatewaySpec {
+
+    private val logger = LoggerFactory.getLogger(PaymentGatewayImpl::class.java)
 
     override fun processPaymentInTransaction(
         walletId: UUID,
@@ -123,6 +127,18 @@ class PaymentGatewayImpl(
                     .where(PAYMENT_IDEMPOTENCY_KEYS.WALLET_ID.eq(walletId))
                     .and(PAYMENT_IDEMPOTENCY_KEYS.IDEMPOTENCY_KEY.eq(idempotencyKey))
                     .execute()
+
+                tx.insertInto(PAYMENT_AUDIT_EVENTS)
+                    .set(PAYMENT_AUDIT_EVENTS.WALLET_ID, walletId)
+                    .set(PAYMENT_AUDIT_EVENTS.AMOUNT, amount)
+                    .set(PAYMENT_AUDIT_EVENTS.STATUS, "REJECTED")
+                    .set(PAYMENT_AUDIT_EVENTS.REASON, "LIMIT_EXCEEDED")
+                    .set(PAYMENT_AUDIT_EVENTS.OCCURRED_AT, now)
+                    .set(PAYMENT_AUDIT_EVENTS.CREATED_AT, now)
+                    .execute()
+
+                logger.info("Payment rejected: walletId={}, amount={}, reason=LIMIT_EXCEEDED", walletId, amount)
+
                 return@transactionResult TransactionResult.Rejected
             }
 
@@ -169,6 +185,17 @@ class PaymentGatewayImpl(
                 .where(PAYMENT_IDEMPOTENCY_KEYS.WALLET_ID.eq(walletId))
                 .and(PAYMENT_IDEMPOTENCY_KEYS.IDEMPOTENCY_KEY.eq(idempotencyKey))
                 .execute()
+
+            tx.insertInto(PAYMENT_AUDIT_EVENTS)
+                .set(PAYMENT_AUDIT_EVENTS.WALLET_ID, walletId)
+                .set(PAYMENT_AUDIT_EVENTS.AMOUNT, amount)
+                .set(PAYMENT_AUDIT_EVENTS.STATUS, "APPROVED")
+                .set(PAYMENT_AUDIT_EVENTS.REASON, null as String?)
+                .set(PAYMENT_AUDIT_EVENTS.OCCURRED_AT, now)
+                .set(PAYMENT_AUDIT_EVENTS.CREATED_AT, now)
+                .execute()
+
+            logger.info("Payment approved: walletId={}, paymentId={}, amount={}", walletId, paymentRecord.get(PAYMENTS.ID), amount)
 
             TransactionResult.Approved(
                 PaymentEntity(

@@ -43,7 +43,7 @@ jooq {
                     name = "org.jooq.codegen.JavaGenerator"
                     database.apply {
                         name = "org.jooq.meta.extensions.ddl.DDLDatabase"
-                        includes = "wallets|policies|wallet_policies|payments|limit_consumptions|payment_idempotency_keys"
+                        includes = "wallets|policies|wallet_policies|payments|limit_consumptions|payment_idempotency_keys|payment_audit_events"
                         excludes = "flyway_schema_history"
                         properties.add(
                             org.jooq.meta.jaxb.Property()

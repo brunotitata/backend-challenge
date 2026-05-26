@@ -6,6 +6,7 @@ import com.trace.payment.adapters.database.dao.PolicyDAOSpecImpl
 import com.trace.payment.adapters.database.dao.WalletDAOSpecImpl
 import com.trace.payment.adapters.database.gateway.PaymentGatewayImpl
 import com.trace.payment.adapters.web.configs.configureErrorHandling
+import com.trace.payment.adapters.web.configs.configureRequestId
 import com.trace.payment.adapters.web.configs.configureSerialization
 import com.trace.payment.adapters.web.routes.configureHealthRoutes
 import com.trace.payment.adapters.web.routes.configurePaymentRoutes
@@ -51,6 +52,7 @@ fun main() {
 
         configureSerialization()
         configureErrorHandling()
+        configureRequestId()
         configureHealthRoutes()
         configureWalletRoutes(createWalletUseCase)
         configurePolicyRoutes(

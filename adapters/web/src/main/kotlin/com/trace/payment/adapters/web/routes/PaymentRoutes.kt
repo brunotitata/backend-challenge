@@ -5,6 +5,7 @@ import com.trace.payment.adapters.web.dtos.CreatePaymentResponseDTO
 import com.trace.payment.adapters.web.dtos.DataResponseDTO
 import com.trace.payment.adapters.web.dtos.ListPaymentResponseDTO
 import com.trace.payment.adapters.web.dtos.MetaDTO
+import com.trace.payment.adapters.web.configs.RequestIdKey
 import com.trace.payment.boundary.input.ListPaymentsUseCaseSpec
 import com.trace.payment.boundary.input.ProcessPaymentUseCaseSpec
 import io.ktor.http.*
@@ -13,6 +14,7 @@ import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import org.slf4j.LoggerFactory
 import java.time.Instant
 import java.util.UUID
 
@@ -20,12 +22,15 @@ private const val IDEMPOTENCY_KEY_MAX_LENGTH = 255
 private const val DEFAULT_PAGE_LIMIT = 20
 private const val MAX_PAGE_LIMIT = 100
 
+private val logger = LoggerFactory.getLogger("PaymentRoutes")
+
 fun Application.configurePaymentRoutes(
     processPaymentUseCase: ProcessPaymentUseCaseSpec,
     listPaymentsUseCase: ListPaymentsUseCaseSpec,
 ) {
     routing {
         post("/wallets/{walletId}/payments") {
+            val requestId = call.attributes.getOrNull(RequestIdKey) ?: "unknown"
 
             val idempotencyKey = call.request.headers["Idempotency-Key"]
             if (idempotencyKey.isNullOrBlank()) {
@@ -54,6 +59,8 @@ fun Application.configurePaymentRoutes(
                     occurredAt = payment.occurredAt.toString(),
                 ),
             )
+
+            logger.info("metric=payment_processed requestId={} walletId={} status=APPROVED amount={}", requestId, walletId, amount)
         }
 
         get("/wallets/{walletId}/payments") {
