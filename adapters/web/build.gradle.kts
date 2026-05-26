@@ -5,7 +5,7 @@ plugins {
 
 val ktorVersion = "2.3.12"
 
-dependencies {
+ dependencies {
     implementation(project(":entities"))
     implementation(project(":exceptions"))
     implementation(project(":input-boundary"))
@@ -15,4 +15,5 @@ dependencies {
     implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
     implementation("io.ktor:ktor-server-status-pages:$ktorVersion")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
-}
+    implementation("io.github.smiley4:ktor-swagger-ui:2.10.0")
+ }

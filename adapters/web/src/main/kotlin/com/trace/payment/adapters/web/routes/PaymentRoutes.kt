@@ -8,6 +8,8 @@ import com.trace.payment.adapters.web.dtos.MetaDTO
 import com.trace.payment.adapters.web.configs.RequestIdKey
 import com.trace.payment.boundary.input.ListPaymentsUseCaseSpec
 import com.trace.payment.boundary.input.ProcessPaymentUseCaseSpec
+import io.github.smiley4.ktorswaggerui.dsl.get
+import io.github.smiley4.ktorswaggerui.dsl.post
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.plugins.BadRequestException
@@ -29,7 +31,36 @@ fun Application.configurePaymentRoutes(
     listPaymentsUseCase: ListPaymentsUseCaseSpec,
 ) {
     routing {
-        post("/wallets/{walletId}/payments") {
+        post("/wallets/{walletId}/payments", {
+            description = "Processa um pagamento para uma carteira"
+            tags = listOf("payments")
+            request {
+                headerParameter<String>("Idempotency-Key") {
+                    description = "Chave de idempotência para evitar duplicidade"
+                    required = true
+                }
+                pathParameter<String>("walletId") {
+                    description = "ID da carteira"
+                    required = true
+                }
+                body<CreatePaymentRequestDTO> {
+                    description = "Dados do pagamento"
+                    required = true
+                }
+            }
+            response {
+                HttpStatusCode.Created to {
+                    description = "Pagamento processado com sucesso"
+                    body<CreatePaymentResponseDTO>()
+                }
+                HttpStatusCode.BadRequest to {
+                    description = "Dados inválidos ou cabeçalho Idempotency-Key ausente"
+                }
+                HttpStatusCode.UnprocessableEntity to {
+                    description = "Pagamento rejeitado por política"
+                }
+            }
+        }) {
             val requestId = call.attributes.getOrNull(RequestIdKey) ?: "unknown"
 
             val idempotencyKey = call.request.headers["Idempotency-Key"]
@@ -63,7 +94,41 @@ fun Application.configurePaymentRoutes(
             logger.info("metric=payment_processed requestId={} walletId={} status=APPROVED amount={}", requestId, walletId, amount)
         }
 
-        get("/wallets/{walletId}/payments") {
+        get("/wallets/{walletId}/payments", {
+            description = "Lista os pagamentos de uma carteira com paginação por cursor"
+            tags = listOf("payments")
+            request {
+                pathParameter<String>("walletId") {
+                    description = "ID da carteira"
+                    required = true
+                }
+                queryParameter<String>("startDate") {
+                    description = "Filtro de data inicial (ISO-8601)"
+                    required = false
+                }
+                queryParameter<String>("endDate") {
+                    description = "Filtro de data final (ISO-8601)"
+                    required = false
+                }
+                queryParameter<String>("cursor") {
+                    description = "Cursor para paginação"
+                    required = false
+                }
+                queryParameter<Int>("limit") {
+                    description = "Limite de itens por página (máx. $MAX_PAGE_LIMIT)"
+                    required = false
+                }
+            }
+            response {
+                HttpStatusCode.OK to {
+                    description = "Lista de pagamentos"
+                    body<DataResponseDTO<ListPaymentResponseDTO>>()
+                }
+                HttpStatusCode.BadRequest to {
+                    description = "Parâmetros de consulta inválidos"
+                }
+            }
+        }) {
             val walletId = UUID.fromString(call.parameters["walletId"])
 
             val startDate = call.request.queryParameters["startDate"]?.let {

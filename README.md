@@ -55,6 +55,7 @@ PostgreSQL
 | Pool de conexões | HikariCP 5.1.0 |
 | Testes | JUnit 5, Ktor TestHost, Testcontainers 1.20.4 |
 | Build | Gradle Kotlin DSL |
+| Documentação | Swagger UI (ktor-swagger-ui) |
 | Container | Docker Compose |
 
 ---
@@ -97,6 +98,23 @@ PostgreSQL
 
 ---
 
+## Documentação da API (Swagger UI)
+
+A API está documentada automaticamente via **Swagger UI** integrado ao Ktor. Após iniciar a aplicação, acesse:
+
+```
+http://localhost:8080/swagger-ui
+```
+
+A documentação interativa inclui:
+- Descrição de todos os endpoints disponíveis
+- Parâmetros de path, query e headers
+- Schemas dos request/response bodies
+- Códigos de status HTTP e possíveis erros
+- Testes diretos pela interface do Swagger
+
+---
+
 ## Como Rodar Testes
 
 ```bash
@@ -124,6 +142,8 @@ Para executar manualmente (requer banco rodando):
 ---
 
 ## Endpoints Disponíveis
+
+> A documentação completa e interativa de todos os endpoints está disponível em [`http://localhost:8080/swagger-ui`](http://localhost:8080/swagger-ui) após iniciar a aplicação.
 
 ### Health Check
 ```

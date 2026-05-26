@@ -8,6 +8,7 @@ import com.trace.payment.adapters.database.gateway.PaymentGatewayImpl
 import com.trace.payment.adapters.web.configs.configureErrorHandling
 import com.trace.payment.adapters.web.configs.configureRequestId
 import com.trace.payment.adapters.web.configs.configureSerialization
+import com.trace.payment.adapters.web.configs.configureSwagger
 import com.trace.payment.adapters.web.routes.configureHealthRoutes
 import com.trace.payment.adapters.web.routes.configurePaymentRoutes
 import com.trace.payment.adapters.web.routes.configurePolicyRoutes
@@ -53,6 +54,7 @@ fun main() {
         configureSerialization()
         configureErrorHandling()
         configureRequestId()
+        configureSwagger()
         configureHealthRoutes()
         configureWalletRoutes(createWalletUseCase)
         configurePolicyRoutes(

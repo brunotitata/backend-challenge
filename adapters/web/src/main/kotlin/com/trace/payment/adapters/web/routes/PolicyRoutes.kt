@@ -6,6 +6,9 @@ import com.trace.payment.boundary.input.AssignPolicyUseCaseSpec
 import com.trace.payment.boundary.input.CreatePolicyUseCaseSpec
 import com.trace.payment.boundary.input.ListPoliciesUseCaseSpec
 import com.trace.payment.boundary.input.ListWalletPoliciesUseCaseSpec
+import io.github.smiley4.ktorswaggerui.dsl.get
+import io.github.smiley4.ktorswaggerui.dsl.post
+import io.github.smiley4.ktorswaggerui.dsl.put
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
@@ -23,7 +26,25 @@ fun Application.configurePolicyRoutes(
 ) {
     routing {
 
-        post("/policies") {
+        post("/policies", {
+            description = "Cria uma nova política"
+            tags = listOf("policies")
+            request {
+                body<CreatePolicyRequestDTO> {
+                    description = "Dados para criação da política"
+                    required = true
+                }
+            }
+            response {
+                HttpStatusCode.Created to {
+                    description = "Política criada com sucesso"
+                    body<PolicyResponseDTO>()
+                }
+                HttpStatusCode.BadRequest to {
+                    description = "Dados inválidos"
+                }
+            }
+        }) {
             val request = call.receive<CreatePolicyRequestDTO>()
 
             val name = request.name
@@ -59,7 +80,16 @@ fun Application.configurePolicyRoutes(
             )
         }
 
-        get("/policies") {
+        get("/policies", {
+            description = "Lista todas as políticas"
+            tags = listOf("policies")
+            response {
+                HttpStatusCode.OK to {
+                    description = "Lista de políticas"
+                    body<DataResponseDTO<PolicyResponseDTO>>()
+                }
+            }
+        }) {
             val policies = listPoliciesUseCase.execute()
             call.respond(
                 DataResponseDTO(
@@ -82,7 +112,25 @@ fun Application.configurePolicyRoutes(
             )
         }
 
-        get("/wallets/{walletId}/policies") {
+        get("/wallets/{walletId}/policies", {
+            description = "Lista as políticas ativas de uma carteira"
+            tags = listOf("policies")
+            request {
+                pathParameter<String>("walletId") {
+                    description = "ID da carteira"
+                    required = true
+                }
+            }
+            response {
+                HttpStatusCode.OK to {
+                    description = "Lista de políticas da carteira"
+                    body<DataResponseDTO<WalletPolicyResponseDTO>>()
+                }
+                HttpStatusCode.BadRequest to {
+                    description = "ID da carteira inválido"
+                }
+            }
+        }) {
             val walletId = UUID.fromString(call.parameters["walletId"])
             val policies = listWalletPoliciesUseCase.execute(walletId)
             call.respond(
@@ -107,7 +155,29 @@ fun Application.configurePolicyRoutes(
             )
         }
 
-        put("/wallets/{walletId}/policy") {
+        put("/wallets/{walletId}/policy", {
+            description = "Atribui uma política a uma carteira"
+            tags = listOf("policies")
+            request {
+                pathParameter<String>("walletId") {
+                    description = "ID da carteira"
+                    required = true
+                }
+                body<AssignPolicyRequestDTO> {
+                    description = "Dados para atribuição da política"
+                    required = true
+                }
+            }
+            response {
+                HttpStatusCode.OK to {
+                    description = "Política atribuída com sucesso"
+                    body<AssignPolicyResponseDTO>()
+                }
+                HttpStatusCode.BadRequest to {
+                    description = "Dados inválidos"
+                }
+            }
+        }) {
             val walletId = UUID.fromString(call.parameters["walletId"])
             val request = call.receive<AssignPolicyRequestDTO>()
             val policyIdStr = request.policyId
